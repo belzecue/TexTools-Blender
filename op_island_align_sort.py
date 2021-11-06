@@ -1,15 +1,13 @@
 import bpy
 import bmesh
 import operator
-import math
 
+from itertools import chain
 from mathutils import Vector
-from collections import defaultdict
-
-
 from . import utilities_uv
 import imp
 imp.reload(utilities_uv)
+
 
 
 class op(bpy.types.Operator):
@@ -17,7 +15,6 @@ class op(bpy.types.Operator):
 	bl_label = "Align & Sort"
 	bl_description = "Rotates UV islands to minimal bounds and sorts them horizontal or vertical"
 	bl_options = {'REGISTER', 'UNDO'}
-
 
 	is_vertical : bpy.props.BoolProperty(description="Vertical or Horizontal orientation", default=True)
 	padding : bpy.props.FloatProperty(description="Padding between UV islands", default=0.05)
@@ -27,79 +24,54 @@ class op(bpy.types.Operator):
 
 		if not bpy.context.active_object:
 			return False
-
 		if bpy.context.active_object.type != 'MESH':
 			return False
-
-		#Only in Edit mode
 		if bpy.context.active_object.mode != 'EDIT':
 			return False
-
-		#Only in UV editor mode
 		if bpy.context.area.type != 'IMAGE_EDITOR':
 			return False
-		
-		#Requires UV map
 		if not bpy.context.object.data.uv_layers:
-			return False 	#self.report({'WARNING'}, "Object must have more than one UV map")
-
-		#Not in Synced mode
+			return False
 		if bpy.context.scene.tool_settings.use_uv_select_sync:
 			return False
-
 		return True
 
 
 	def execute(self, context):
-		main(context, self.is_vertical, self.padding)
+		all_ob_bounds = utilities_uv.multi_object_loop(main, context, self.is_vertical, self.padding, need_results=True)
+
+		if not any(all_ob_bounds):
+			return {'CANCELLED'}
+
+		utilities_uv.multi_object_loop(relocate, context, self.is_vertical, self.padding, all_ob_bounds, ob_num=0)
 		return {'FINISHED'}
 
 
+
 def main(context, isVertical, padding):
-	print("Executing IslandsAlignSort main {}".format(padding))
-   	
-	#Store selection
-	utilities_uv.selection_store()
+	bm = bmesh.from_edit_mesh(bpy.context.active_object.data)
+	uv_layers = bm.loops.layers.uv.verify()
 
-	if bpy.context.tool_settings.transform_pivot_point != 'CURSOR':
-		bpy.context.tool_settings.transform_pivot_point = 'CURSOR'
+	selected_faces = [face for face in bm.faces if any([loop[uv_layers].select for loop in face.loops]) and face.select]
+	if not selected_faces:
+		return {}
 
-	#Only in Face or Island mode
-	if bpy.context.scene.tool_settings.uv_select_mode is not 'FACE' or 'ISLAND':
-		bpy.context.scene.tool_settings.uv_select_mode = 'FACE'
-
-	bm = bmesh.from_edit_mesh(bpy.context.active_object.data);
-	uv_layers = bm.loops.layers.uv.verify();
-	
-
-	boundsAll = utilities_uv.getSelectionBBox()
-
-
-	islands = utilities_uv.getSelectionIslands()
-	allSizes = {}	#https://stackoverflow.com/questions/613183/sort-a-python-dictionary-by-value
+	boundsAll = utilities_uv.get_BBOX(selected_faces, bm, uv_layers)
+	islands = utilities_uv.getSelectionIslands(bm, uv_layers, selected_faces)
+	allSizes = {}
 	allBounds = {}
 
-	print("Islands: "+str(len(islands))+"x")
-
-	bpy.context.window_manager.progress_begin(0, len(islands))
-
 	#Rotate to minimal bounds
-	for i in range(0, len(islands)):
-		alignIslandMinimalBounds(uv_layers, islands[i])
+	for i, island in enumerate(islands):
+		utilities_uv.alignMinimalBounds(bm, uv_layers, island)
 
-		# Collect BBox sizes
-		bounds = utilities_uv.getSelectionBBox()
-		allSizes[i] = max(bounds['width'], bounds['height']) + i*0.000001;#Make each size unique
-		allBounds[i] = bounds;
-		print("Rotate compact:  "+str(allSizes[i]))
-
-		bpy.context.window_manager.progress_update(i)
-
-	bpy.context.window_manager.progress_end()
-
+		#Collect BBox sizes
+		bounds = utilities_uv.get_BBOX(island, bm, uv_layers)
+		allSizes[i] = max(bounds['width'], bounds['height']) + i*0.000001	#Make each size unique
+		allBounds[i] = bounds
 
 	#Position by sorted size in row
-	sortedSizes = sorted(allSizes.items(), key=operator.itemgetter(1))#Sort by values, store tuples
+	sortedSizes = sorted(allSizes.items(), key=operator.itemgetter(1))	#Sort by values, store tuples
 	sortedSizes.reverse()
 	offset = 0.0
 	for sortedSize in sortedSizes:
@@ -107,65 +79,56 @@ def main(context, isVertical, padding):
 		island = islands[index]
 		bounds = allBounds[index]
 
-		#Select Island
-		bpy.ops.uv.select_all(action='DESELECT')
-		utilities_uv.set_selected_faces(island)
-		
 		#Offset Island
+		delta = Vector((boundsAll['min'].x - bounds['min'].x, boundsAll['max'].y - bounds['max'].y))
 		if(isVertical):
-			delta = Vector((boundsAll['min'].x - bounds['min'].x, boundsAll['max'].y - bounds['max'].y));
-			bpy.ops.transform.translate(value=(delta.x, delta.y-offset, 0))
-			offset += bounds['height']+padding
+			for face in island:
+				for loop in face.loops:
+					loop[uv_layers].uv += Vector((delta.x, delta.y-offset))
+			offset += bounds['height'] + padding
 		else:
-			print("Horizontal")
-			delta = Vector((boundsAll['min'].x - bounds['min'].x, boundsAll['max'].y - bounds['max'].y));
-			bpy.ops.transform.translate(value=(delta.x+offset, delta.y, 0))
-			offset += bounds['width']+padding
+			for face in island:
+				for loop in face.loops:
+					loop[uv_layers].uv += Vector((delta.x+offset, delta.y))
+			offset += bounds['width'] + padding
+
+	return utilities_uv.get_BBOX(chain.from_iterable(islands), bm, uv_layers)
 
 
-	#Restore selection
-	utilities_uv.selection_restore()
 
+def relocate(context, isVertical, padding, all_ob_bounds, ob_num=0):
+	bm = bmesh.from_edit_mesh(bpy.context.active_object.data)
+	uv_layers = bm.loops.layers.uv.verify()
 
-def alignIslandMinimalBounds(uv_layers, faces):
-	# Select Island
-	bpy.ops.uv.select_all(action='DESELECT')
-	utilities_uv.set_selected_faces(faces)
+	islands = utilities_uv.getSelectionIslands(bm, uv_layers)
 
-	steps = 8
-	angle = 45;	# Starting Angle, half each step
+	if ob_num > 0 :
+		if all_ob_bounds[ob_num]:
+			offset = 0.0
+			origin = Vector((0,0))
+			for i in range(0, ob_num):
+				if all_ob_bounds[i]:
+					if isVertical:
+						offset += all_ob_bounds[i]['height'] + padding
+					else:
+						offset += all_ob_bounds[i]['width'] + padding
+			for i in range(0, ob_num+1):
+				if all_ob_bounds[i]:
+					origin.x = all_ob_bounds[i]['min'].x
+					origin.y = all_ob_bounds[i]['max'].y
+					break
 
-	bboxPrevious = utilities_uv.getSelectionBBox()
-
-	for i in range(0, steps):
-		# Rotate right
-		bpy.ops.transform.rotate(value=(angle * math.pi / 180), orient_axis='Z')
-		bbox = utilities_uv.getSelectionBBox()
-
-		if i == 0:
-			sizeA = bboxPrevious['width'] * bboxPrevious['height']
-			sizeB = bbox['width'] * bbox['height']
-			if abs(bbox['width'] - bbox['height']) <= 0.0001 and sizeA < sizeB:
-				# print("Already squared")
-				bpy.ops.transform.rotate(value=(-angle * math.pi / 180), orient_axis='Z')
-				break;
-
-
-		if bbox['minLength'] < bboxPrevious['minLength']:
-			bboxPrevious = bbox;	# Success
-		else:
-			# Rotate Left
-			bpy.ops.transform.rotate(value=(-angle*2 * math.pi / 180), orient_axis='Z')
-			bbox = utilities_uv.getSelectionBBox()
-			if bbox['minLength'] < bboxPrevious['minLength']:
-				bboxPrevious = bbox;	# Success
+			delta = Vector((origin.x - all_ob_bounds[ob_num]['min'].x, origin.y - all_ob_bounds[ob_num]['max'].y))
+			if isVertical:
+				for island in islands:
+					for face in island:
+						for loop in face.loops:
+							loop[uv_layers].uv += Vector((delta.x, delta.y-offset))
 			else:
-				# Restore angle of this iteration
-				bpy.ops.transform.rotate(value=(angle * math.pi / 180), orient_axis='Z')
+				for island in islands:
+					for face in island:
+						for loop in face.loops:
+							loop[uv_layers].uv += Vector((delta.x+offset, delta.y))
 
-		angle = angle / 2
-
-	if bboxPrevious['width'] < bboxPrevious['height']:
-		bpy.ops.transform.rotate(value=(90 * math.pi / 180), orient_axis='Z')
 
 bpy.utils.register_class(op)

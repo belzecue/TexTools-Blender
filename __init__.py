@@ -1,12 +1,11 @@
 bl_info = {
 	"name": "TexTools",
 	"description": "Professional UV and Texture tools for Blender.",
-	"author": "renderhjs, (Port to 2.80 by Sav Martin)",
-	"version": (1, 3, 00),
+	"author": "renderhjs, franMarz, Sav Martin",
+	"version": (1, 4, 4),
 	"blender": (2, 80, 0),
 	"category": "UV",
-	"location": "UV Image Editor > Tools > 'TexTools' panel",
-	"wiki_url": "http://renderhjs.net/textools/blender/"
+	"location": "UV Image Editor > Tools > 'TexTools' panel"
 }
 
 
@@ -44,11 +43,15 @@ if "bpy" in locals():
 	imp.reload(op_island_mirror)
 	imp.reload(op_island_rotate_90)
 	imp.reload(op_island_straighten_edge_loops)
+	imp.reload(op_island_centralize)
+	imp.reload(op_randomize)
 	imp.reload(op_rectify)
 	imp.reload(op_select_islands_identical)
 	imp.reload(op_select_islands_outline)
 	imp.reload(op_select_islands_overlap)
 	imp.reload(op_select_islands_flipped)
+	imp.reload(op_select_zero)
+	imp.reload(op_relax)
 	imp.reload(op_smoothing_uv_islands)
 	imp.reload(op_meshtex_create)
 	imp.reload(op_meshtex_wrap)
@@ -104,11 +107,15 @@ else:
 	from . import op_island_mirror
 	from . import op_island_rotate_90
 	from . import op_island_straighten_edge_loops
+	from . import op_island_centralize
+	from . import op_randomize
 	from . import op_rectify
 	from . import op_select_islands_identical
 	from . import op_select_islands_outline
 	from . import op_select_islands_overlap
 	from . import op_select_islands_flipped
+	from . import op_select_zero
+	from . import op_relax
 	from . import op_smoothing_uv_islands
 	from . import op_meshtex_create
 	from . import op_meshtex_wrap
@@ -131,21 +138,18 @@ else:
 	from . import op_uv_fill
 	from . import op_uv_resize
 	from . import op_uv_size_get
-	
+
 
 # Import general modules. Important: must be placed here and not on top
 import bpy
-import os
 import math
-import string
-import bpy.utils.previews
 
-from bpy.types import Menu, Operator, Panel, UIList
-
+from bpy.types import Menu, Operator, Panel, AddonPreferences, PropertyGroup
 from bpy.props import (
 	StringProperty,
 	BoolProperty,
 	IntProperty,
+	IntVectorProperty,
 	FloatProperty,
 	FloatVectorProperty,
 	EnumProperty,
@@ -154,11 +158,23 @@ from bpy.props import (
 
 
 
-class Panel_Preferences(bpy.types.AddonPreferences):
-	bl_idname = __name__
+def on_bake_def_back_color_set(self, context):
+	if self.bool_bake_back_color:
+		bpy.context.scene.texToolsSettings.bake_back_color = self.bake_back_color_def
+
+
+def on_bake_color_space_set(self, context):
+	if utilities_ui.set_bake_color_space_int(utilities_ui.get_bake_mode()):
+		bpy.context.scene.texToolsSettings.bake_color_space = 'Non-Color'
+	else:
+		bpy.context.scene.texToolsSettings.bake_color_space = 'sRGB'
+
+
+class Panel_Preferences(AddonPreferences):
+	bl_idname = __package__
 
 	# Addon Preferences https://docs.blender.org/api/blender_python_api_2_67_release/bpy.types.AddonPreferences.html
-	swizzle_y_coordinate : bpy.props.EnumProperty(items= 
+	swizzle_y_coordinate : EnumProperty(items= 
 		[	
 			('Y+', 'Y+ OpenGL', 'Used in Blender, Maya, Modo, Toolbag, Unity'), 
 			('Y-', 'Y- Direct X', 'Used in 3ds Max, CryENGINE, Source, Unreal Engine')
@@ -167,27 +183,80 @@ class Panel_Preferences(bpy.types.AddonPreferences):
 		name = "Swizzle Coordinates", 
 		default = 'Y+'
 	)
-	bake_32bit_float : bpy.props.EnumProperty(items= 
+	bake_device : EnumProperty(items= 
+		[	
+			('DEFAULT', 'Default', 'Use the device specified in the Render Properties panel'), 
+			('CPU', 'CPU', 'Always use the CPU when baking with Cycles'), 
+			('GPU', 'GPU', 'Always use the GPU when baking with Cycles')
+		], 
+		description="Temporary device override only for baking", 
+		name = "Baking Device", 
+		default = 'DEFAULT'
+	)
+	bake_32bit_float : EnumProperty(items= 
 		[	
 			('8', '8 Bit', ''), 
 			('32', '32 Bit', '')
 		], 
-		description="",
+		description="", 
 		name = "Image depth", 
 		default = '8'
 	)
+	bake_back_color_def : FloatVectorProperty( 
+		name="Global custom baking background color", 
+		subtype='COLOR', 
+		size=4, 
+		min=0, max=1, 
+		default=(0.0, 0.0, 0.0, 1.0), 
+		update = on_bake_def_back_color_set
+	)
+	bool_bake_back_color : EnumProperty(items= 
+		[	
+			('DEFAULT', 'Default', 'Use default TexTools background colors for baked textures'), 
+			('CUSTOM', 'Custom', 'Set a global custom RGBA color for the background. Note that a transparent background can be specified')
+		], 
+		description="Mode for baked textures background color and alpha", 
+		name = "Bake background", 
+		default = 'DEFAULT', 
+		update = on_bake_def_back_color_set
+	)
+	bake_color_space_def : EnumProperty(items= 
+		[	
+			('STANDARD', 'Standard', 'Set sRGB as Color Space for all baked textures except for Normal maps'), 
+			('PBR', 'PBR typical', 'Set Linear as Color Space for all baked maps except for Diffuse/Base Color, SSS/Emission color, colored Transmission, Environment, Combined or any custom Mode')
+		], 
+		description="Automatically set the Color Space of the baked images. Can be changed in the Baking panel", 
+		name = "Bake Color Space", 
+		default = 'STANDARD', 
+		update = on_bake_color_space_set
+	)
+	bool_alpha_ignore : BoolProperty(name="Ignore Alpha when baking other modes", default=True)
+	bool_emission_ignore : BoolProperty(name="Ignore Emission Strength when baking Emission", default=True)
+	bool_clean_transmission : BoolProperty(name="Ignore other channels when baking Transmission", default=False)
+	bool_help : BoolProperty(name="Show help links buttons on panels", default=True)
+
 
 	def draw(self, context):
 		layout = self.layout
 
 		box = layout.box()
 		col = box.column(align=True)
+		col.prop(self, "bake_device", icon='PREFERENCES')
+		if self.bake_device == 'DEFAULT':
+			col.label(text="Use the device specified in the Render Properties panel.")
+		elif self.bake_device == 'CPU':
+			col.label(text="Always use the CPU when baking in TexTools with Cycles.")
+		elif self.bake_device == 'GPU':
+			col.label(text="Always use the GPU when baking in TexTools with Cycles.")
+
+		box.separator()
+		col = box.column(align=True)
 		col.prop(self, "swizzle_y_coordinate", icon='ORIENTATION_GLOBAL')
 		if self.swizzle_y_coordinate == 'Y+':
 			col.label(text="Y+ used in: Blender, Maya, Modo, Toolbag, Unity")
 		elif self.swizzle_y_coordinate == 'Y-':
 			col.label(text="Y- used in: 3ds Max, CryENGINE, Source, Unreal Engine")
-		
+
 		box.separator()
 		col = box.column(align=True)
 		col.prop(self, "bake_32bit_float", icon='IMAGE_RGB')
@@ -195,6 +264,30 @@ class Panel_Preferences(bpy.types.AddonPreferences):
 			col.label(text="8 Bit images are used. Banding may appear in normal maps.")
 		elif self.bake_32bit_float == '32':
 			col.label(text="32 Bit images are used. Images may require dithering to 8 bit.")
+
+		box.separator()
+		col = box.column(align=True)
+		col.prop(self, "bake_color_space_def", icon='IMAGE_ZDEPTH')
+		if self.bake_device == 'STANDARD':
+			col.label(text="Set sRGB as Color Space for all baked textures except for Normal maps.")
+		elif self.bake_device == 'PBR':
+			col.label(text="Set Linear as Color Space for all baked maps except for Diffuse/Base Color, SSS/Emission color, colored Transmission, Environment, Combined or any custom Mode.")
+
+		box.separator()
+		col = box.column(align=True)
+		col.prop(self, "bool_bake_back_color", icon='IMAGE_RGB_ALPHA')
+		if self.bool_bake_back_color == 'CUSTOM':
+			col.prop(self, "bake_back_color_def", text ="")
+
+		box.separator()
+		col = box.column(align=True)
+		col.prop(self, "bool_alpha_ignore", icon='ANIM')
+		col.prop(self, "bool_clean_transmission", icon='ANIM')
+		col.prop(self, "bool_emission_ignore", icon='ANIM')
+
+		box.separator()
+		col = box.column(align=True)
+		col.prop(self, "bool_help", icon='INFO')
 		
 		
 		if not hasattr(bpy.types,"ShaderNodeBevel"):
@@ -206,13 +299,12 @@ class Panel_Preferences(bpy.types.AddonPreferences):
 			col.label(text="Use nightly builds of Blender 2.79 or 2.8 to access Bevel baking")
 
 
-
 		box = layout.box()
 
 		box.label(text="Additional Links")
 		col = box.column(align=True)
 		col.operator("wm.url_open", text="Donate", icon='HELP').url = "https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=ZC9X4LE7CPQN6"
-		col.operator("wm.url_open", text="GIT Code", icon='WORDWRAP_ON').url = "https://bitbucket.org/renderhjs/textools-blender/src"
+		col.operator("wm.url_open", text="GIT Code", icon='WORDWRAP_ON').url = "https://github.com/SavMartin/TexTools-Blender"
 		
 		col.label(text="Discussions")
 		row = col.row(align=True)
@@ -222,24 +314,24 @@ class Panel_Preferences(bpy.types.AddonPreferences):
 		
 
 
-class UV_OT_op_debug(bpy.types.Operator):
+class UV_OT_op_debug(Operator):
 	bl_idname = "uv.op_debug"
 	bl_label = "Debug"
-	bl_description = "Open console and enable dbug mode"
+	bl_description = "Open console and enable debug mode"
 
 	@classmethod
 	def poll(cls, context):
 		return True
 
 	def execute(self, context):
-		bpy.app.debug = True# Debug Vertex indexies
+		bpy.app.debug = True	# Debug Vertex indexies
 		bpy.context.object.data.show_extra_indices = True
-		bpy.app.debug_value = 1 #Set to Non '0
+		bpy.app.debug_value = 1	#Set to Non '0
 		return {'FINISHED'}
 
 
 
-class UV_OT_op_disable_uv_sync(bpy.types.Operator):
+class UV_OT_op_disable_uv_sync(Operator):
 	bl_idname = "uv.op_disable_uv_sync"
 	bl_label = "Disable Sync"
 	bl_description = "Disable UV sync mode"
@@ -256,12 +348,12 @@ class UV_OT_op_disable_uv_sync(bpy.types.Operator):
 
 
 
-class UV_OT_op_select_bake_set(bpy.types.Operator):
+class UV_OT_op_select_bake_set(Operator):
 	bl_idname = "uv.op_select_bake_set"
 	bl_label = "Select"
 	bl_description = "Select this bake set in scene"
 
-	select_set : bpy.props.StringProperty(default="")
+	select_set : StringProperty(default="")
 
 	@classmethod
 	def poll(cls, context):
@@ -270,31 +362,31 @@ class UV_OT_op_select_bake_set(bpy.types.Operator):
 	def execute(self, context):
 		print("Set: "+self.select_set)
 		if self.select_set != "":
-			for set in settings.sets:
-				if set.name == self.select_set:
+			for bset in settings.sets:
+				if bset.name == self.select_set:
 					# Select this entire set
 					bpy.ops.object.select_all(action='DESELECT')
-					for obj in set.objects_low:
+					for obj in bset.objects_low:
 						obj.select_set( state = True, view_layer = None)
-					for obj in set.objects_high:
+					for obj in bset.objects_high:
 						obj.select_set( state = True, view_layer = None)
-					for obj in set.objects_cage:
+					for obj in bset.objects_cage:
 						obj.select_set( state = True, view_layer = None)
 					# Set active object to low poly to better visualize high and low wireframe color
-					if len(set.objects_low) > 0:
-						bpy.context.view_layer.objects.active = set.objects_low[0]
+					if bset.objects_low:
+						bpy.context.view_layer.objects.active = bset.objects_low[0]
 
 					break
 		return {'FINISHED'}
 
 
 
-class UV_OT_op_select_bake_type(bpy.types.Operator):
+class UV_OT_op_select_bake_type(Operator):
 	bl_idname = "uv.op_select_bake_type"
 	bl_label = "Select"
 	bl_description = "Select bake objects of this type"
 
-	select_type : bpy.props.StringProperty(default='low')
+	select_type : StringProperty(default='low')
 
 	@classmethod
 	def poll(cls, context):
@@ -302,20 +394,20 @@ class UV_OT_op_select_bake_type(bpy.types.Operator):
 
 	def execute(self, context):
 		objects = []
-		for set in settings.sets:
+		for bset in settings.sets:
 			if self.select_type == 'low':
-				objects+=set.objects_low
+				objects += bset.objects_low
 			elif self.select_type == 'high':
-				objects+=set.objects_high
+				objects += bset.objects_high
 			elif self.select_type == 'cage':
-				objects+=set.objects_cage
+				objects += bset.objects_cage
 			elif self.select_type == 'float':
-				objects+=set.objects_float
-			elif self.select_type == 'issue' and set.has_issues:
-				objects+=set.objects_low
-				objects+=set.objects_high
-				objects+=set.objects_cage
-				objects+=set.objects_float
+				objects += bset.objects_float
+			elif self.select_type == 'issue' and bset.has_issues:
+				objects += bset.objects_low
+				objects += bset.objects_high
+				objects += bset.objects_cage
+				objects += bset.objects_float
 
 		bpy.ops.object.select_all(action='DESELECT')
 		for obj in objects:
@@ -328,20 +420,18 @@ class UV_OT_op_select_bake_type(bpy.types.Operator):
 def on_dropdown_size(self, context):
 	# Help: http://elfnor.com/drop-down-and-button-select-menus-for-blender-operator-add-ons.html
 	size = int(bpy.context.scene.texToolsSettings.size_dropdown)
-	bpy.context.scene.texToolsSettings.size[0] = size;
-	bpy.context.scene.texToolsSettings.size[1] = size;
+	bpy.context.scene.texToolsSettings.size[0] = size
+	bpy.context.scene.texToolsSettings.size[1] = size
 
-	if size <= 128:
+	if size <= 256:
 		bpy.context.scene.texToolsSettings.padding = 2
-	elif size <= 512:
-		bpy.context.scene.texToolsSettings.padding = 4
 	else:
-		bpy.context.scene.texToolsSettings.padding = 8
+		bpy.context.scene.texToolsSettings.padding = 4
 
 
 
 def on_dropdown_uv_channel(self, context):
-	if bpy.context.active_object != None:
+	if bpy.context.active_object is not None:
 		if bpy.context.active_object.type == 'MESH':
 			if bpy.context.object.data.uv_layers:
 
@@ -354,44 +444,53 @@ def on_dropdown_uv_channel(self, context):
 
 
 def on_color_changed(self, context):
-	for i in range(0, context.scene.texToolsSettings.color_ID_count):
-		utilities_color.assign_color(i)
+	if bpy.context.scene.texToolsSettings.color_assign_mode == 'MATERIALS':
+		for i in range(0, context.scene.texToolsSettings.color_ID_count):
+			utilities_color.assign_color(i)
 
 
 
 def on_color_dropdown_template(self, context):
-	# Change Mesh UV Channel
 	hex_colors = bpy.context.scene.texToolsSettings.color_ID_templates.split(',')
 	bpy.context.scene.texToolsSettings.color_ID_count = len(hex_colors)
 
-	# Assign color slots
 	for i in range(0, len(hex_colors)):
 		color = utilities_color.hex_to_color("#"+hex_colors[i])
 		utilities_color.set_color(i, color)
+	
+	if bpy.context.scene.texToolsSettings.color_assign_mode == 'MATERIALS':
 		utilities_color.assign_color(i)
 
 
 
 def on_color_count_changed(self, context):
-	if bpy.context.active_object != None:
+	if bpy.context.active_object is not None and bpy.context.scene.texToolsSettings.color_assign_mode == 'MATERIALS':
 		utilities_color.validate_face_colors(bpy.context.active_object)
 
 
 
-def get_dropdown_uv_values(self, context):
-	# Requires mesh and UV data
-	if bpy.context.active_object != None:
-		if bpy.context.active_object.type == 'MESH':
-			if bpy.context.object.data.uv_layers:
-				options = []
-				step = 0
-				for uvLoop in bpy.context.object.data.uv_layers:
-					# options.append((str(step), "#{}  {}".format(step+1, uvLoop.name), "Change UV channel to '{}'".format(uvLoop.name), step))
-					options.append((str(step), "UV {}".format(step+1), "Change UV channel to '{}'".format(uvLoop.name), step))
-					step+=1
+def on_color_mode_change(self, context):
+	if bpy.context.scene.texToolsSettings.color_assign_mode == 'MATERIALS':
+		# Refresh color palette of existing colored materials
+		for i in range(0, context.scene.texToolsSettings.color_ID_count):
+			utilities_color.assign_color(i)
+	if bpy.context.active_object is not None:
+		if bpy.context.active_object.mode != 'EDIT' and bpy.context.active_object.mode != 'OBJECT':
+			bpy.ops.object.mode_set(mode='OBJECT')
+	utilities_color.update_properties_tab()
+	utilities_color.update_view_mode()
 
-				return options
-	return []
+
+
+def get_dropdown_uv_values(self, context):
+	options = []
+	obj = bpy.context.active_object
+	if obj and obj.type == 'MESH' and obj.data.uv_layers:
+		step = 0
+		for uvLoop in obj.data.uv_layers:
+			options.append((str(step), "UV {}".format(step+1), "Change UV channel to '{}'".format(uvLoop.name), step))
+			step += 1
+	return options
 
 
 
@@ -399,113 +498,193 @@ def on_slider_meshtexture_wrap(self, context):
 	value = bpy.context.scene.texToolsSettings.meshtexture_wrap
 	obj_uv = utilities_meshtex.find_uv_mesh(bpy.context.selected_objects)
 	if obj_uv:
-		obj_uv.data.shape_keys.key_blocks["model"].value = value
+		obj_uv.data.shape_keys.key_blocks["uv"].value = value
 
 
 
-class TexToolsSettings(bpy.types.PropertyGroup):
+
+class TexToolsSettings(PropertyGroup):
+
+	def get_bake_back_color(self):
+		return self.get("bake_back_color", bpy.context.preferences.addons[__package__].preferences.bake_back_color_def)
+
+	def set_bake_back_color(self, value):
+		if value is not None:
+			self["bake_back_color"] = value
+
+	def get_bake_color_space(self):
+		return self.get("bake_color_space", utilities_ui.set_bake_color_space_int(utilities_ui.get_bake_mode()))
+
+	def set_bake_color_space(self, value):
+		if value is not None:
+			self["bake_color_space"] = value
+
+
 	#Width and Height
-	size : bpy.props.IntVectorProperty(
-		name = "Size",
+	size : IntVectorProperty(
+		name = "Size", 
 		size=2, 
-		description="Texture & UV size in pixels",
-		default = (512,512),
+		description="Texture & UV size in pixels", 
+		default = (512,512), 
 		subtype = "XYZ"
 	)
-	size_dropdown : bpy.props.EnumProperty(
+	size_dropdown : EnumProperty(
 		items = utilities_ui.size_textures, 
 		name = "Texture Size", 
 		update = on_dropdown_size, 
 		default = '512'
 	)
-	uv_channel : bpy.props.EnumProperty(
+	uv_channel : EnumProperty(
 		items = get_dropdown_uv_values, 
 		name = "UV", 
 		update = on_dropdown_uv_channel
 	)
-	padding : bpy.props.IntProperty(
+	UDIMs_source : EnumProperty(items= 
+		[('OBJECT', 'From Object', 'Work on the first detected Tiled UDIM Image in the Active Object Materials'), 
+		('EDITOR', 'Editor Image', 'Work on the UV Editor Linked Image')], 
+		name = "UDIM Tiles Source", 
+		default = 'OBJECT'
+	)
+	padding : IntProperty(
 		name = "Padding",
 		description="padding size in pixels",
 		default = 4,
 		min = 0,
 		max = 256
 	)
-	bake_samples : bpy.props.FloatProperty(
+	bake_samples : FloatProperty(
 		name = "Samples",
 		description = "Samples in Cycles for Baking. The higher the less noise. Default: 64",
 		default = 8,
 		min = 1,
 		max = 4000
 	)
-	bake_curvature_size : bpy.props.IntProperty(
+	bake_curvature_size : IntProperty(
 		name = "Curvature",
 		description = "Curvature offset in pixels to process",
 		default = 1,
 		min = 1,
 		max = 64
 	)
-	bake_wireframe_size : bpy.props.FloatProperty(
+	bake_wireframe_size : FloatProperty(
 		name = "Thickness",
 		description = "Wireframe Thickness in pixels",
 		default = 1,
 		min = 0.1,
 		max = 4.0
 	)
-	bake_bevel_size : bpy.props.FloatProperty(
+	bake_bevel_size : FloatProperty(
 		name = "Radius",
 		description = "Bevel radius 1 to 16",
 		default = 0.05,
 		min = 0.0,
 		max = 1.0
 	)
-	bake_bevel_samples : bpy.props.IntProperty(
+	bake_bevel_samples : IntProperty(
 		name = "Bevel Samples",
 		description = "Bevel Samples",
 		default = 4,
 		min = 1,
 		max = 16
 	)
-
-
-	bake_ray_distance : bpy.props.FloatProperty(
-		name = "Ray Dist.",
-		description = "Ray distance when baking. When using cage used as extrude distance",
-		default = 0.01,
+	bake_thickness_distance : FloatProperty(
+		name = "Distance",
+		description = "AO distance",
+		default = 1.0,
+		min = 0.0,
+		max = 16.0
+	)
+	bake_thickness_contrast : FloatProperty(
+		name = "Contrast",
+		description = "AO contrast",
+		default = 1.0,
+		min = 0.0,
+		max = 2.0
+	)
+	bake_thickness_local : BoolProperty(
+		name = "Only Local",
+		description = "Only detect occlusion from the object itself, and not others",
+		default = True
+	)
+	bake_ray_distance : FloatProperty(
+		name = "Ray Distance",
+		description = "The maximum ray distance for matching points between the active and selected objects. If zero, there is no limit",
+		default = 0.00,
 		min = 0.000,
 		max = 100.00
 	)
-	bake_force_single : bpy.props.BoolProperty(
+	bake_cage_extrusion : FloatProperty(
+		name = "Cage Extrusion",
+		description = "Cage Extrusion, Inflate the cage object by the specified distance for baking",
+		default = 0.00,
+		min = 0.000,
+		max = 100.00
+	)
+	bake_force_single : BoolProperty(
 		name="Single Texture",
 		description="Force a single texture bake accross all selected objects",
 		default = False
 	)
-	bake_sampling : bpy.props.EnumProperty(items= 
+	bake_sampling : EnumProperty(items= 
 		[('1', 'None', 'No Anti Aliasing (Fast)'), 
 		('2', '2x', 'Render 2x and downsample'), 
 		('4', '4x', 'Render 2x and downsample')], name = "AA", default = '1'
 	)
-	bake_freeze_selection : bpy.props.BoolProperty(
+	# Default Color Space have to be Linear as the first bake mode loaded in the UI before refreshing the bake mode is Tangent Normal
+	bake_color_space : EnumProperty(items= 
+		[('sRGB', 'sRGB', 'Standard RGB output color space for the baked texture'), 
+		('Non-Color', 'Linear', 'Linear or Non-Color output color space for the baked texture')], 
+		name = "CS", 
+		default = 'Non-Color', 
+		get = get_bake_color_space, 
+		set = set_bake_color_space
+	)
+	bake_back_color : FloatVectorProperty( 
+		description = "Baked texture background color", 
+		name = "BK", 
+		subtype = 'COLOR', 
+		size = 4, 
+		min = 0, 
+		max = 1, 
+		default = (0.0, 0.0, 0.0, 1.0), 
+		get = get_bake_back_color, 
+		set = set_bake_back_color
+	)
+	bake_freeze_selection : BoolProperty(
 		name="Lock",
 		description="Lock baking sets, don't change with selection",
 		default = False
 	)
-	texel_mode_scale : bpy.props.EnumProperty(items= 
+	align_mode : EnumProperty(items= 
+		[('SELECTION', 'Selection', 'Align selected islands to the selection limits'), 
+		('CANVAS', 'Canvas', 'Align selected islands to the canvas margins'), 
+		('CURSOR', 'Cursor', 'Align selected islands to the cursor position')], 
+		name = "Mode", 
+		default = 'SELECTION'
+	)
+	texel_get_mode : EnumProperty(items= 
+		[('IMAGE', 'Image', 'Per object, get the resolution of the first image found in any used material'), 
+		('SIZE', 'TexTools Size', 'Use the Size specified under the TexTools tab')] + utilities_ui.size_textures, 
+		name = "Texture Size", 
+		default = 'IMAGE'
+	)
+	texel_set_mode : EnumProperty(items= 
 		[('ISLAND', 'Islands', 'Scale UV islands to match Texel Density'), 
 		('ALL', 'Combined', 'Scale all UVs together to match Texel Density')], 
-		name = "Mode", 
+		name = "Set Mode", 
 		default = 'ISLAND'
 	)
-	texel_density : bpy.props.FloatProperty(
+	texel_density : FloatProperty(
 		name = "Texel",
 		description = "Texel size or Pixels per 1 unit ratio",
 		default = 256,
 		min = 0.0
 		# max = 100.00
 	)
-	meshtexture_wrap : bpy.props.FloatProperty(
+	meshtexture_wrap : FloatProperty(
 		name = "Wrap",
 		description = "Transition of mesh texture wrap",
-		default = 0,
+		default = 1,
 		min = 0,
 		max = 1,
 		update = on_slider_meshtexture_wrap, 
@@ -513,7 +692,7 @@ class TexToolsSettings(bpy.types.PropertyGroup):
 	)
 
 	def get_color(hex = "808080"):
-		return bpy.props.FloatVectorProperty(
+		return FloatVectorProperty(
 			name="Color1", 
 			description="Set Color 1 for the Palette", 
 			subtype="COLOR", 
@@ -521,7 +700,7 @@ class TexToolsSettings(bpy.types.PropertyGroup):
 			size=3, 
 			max=1.0, min=0.0,
 			update=on_color_changed
-		)#, update=update_color_1
+		)
 
 	# 10 Color ID's
 	color_ID_color_0 : get_color(hex="#ff0000")
@@ -545,7 +724,7 @@ class TexToolsSettings(bpy.types.PropertyGroup):
 	color_ID_color_18 : get_color()
 	color_ID_color_19 : get_color()
 
-	color_ID_templates : bpy.props.EnumProperty(items= 
+	color_ID_templates : EnumProperty(items= 
 		[	
 			('3d3d3d,7f7f7f,b8b8b8,ffffff', '4 Gray', '...'), 
 			('003153,345d4b,688a42,9db63a,d1e231', '5 Greens', '...'),
@@ -562,7 +741,7 @@ class TexToolsSettings(bpy.types.PropertyGroup):
 		default = 'ff0000,0000ff,00ff00,ffff00,00ffff'
 	)
 
-	color_ID_count : bpy.props.IntProperty(
+	color_ID_count : IntProperty(
 		name = "Count",
 		description="Number of color IDs",
 		default = 5,
@@ -571,14 +750,22 @@ class TexToolsSettings(bpy.types.PropertyGroup):
 		max = 20
 	)
 
-	# bake_do_save = bpy.props.BoolProperty(
+	color_assign_mode : EnumProperty(items= 
+		[('MATERIALS', 'Materials', 'Assign simple colored materials to objects or selected faces'), 
+		('VERTEXCOLORS', 'Vertex Colors', 'Assign colors as Vertex Colors to objects or selected faces')], 
+		name = "Assign Mode", 
+		default = 'MATERIALS', 
+		update = on_color_mode_change
+	)
+
+	# bake_do_save = BoolProperty(
 	# 	name="Save",
 	# 	description="Save the baked texture?",
 	# 	default = False)
 
 
 
-class UI_PT_Panel_Units(bpy.types.Panel):
+class UI_PT_Panel_Units(Panel):
 	bl_label = " "
 	bl_space_type = 'IMAGE_EDITOR'
 	bl_region_type = 'UI'
@@ -612,72 +799,75 @@ class UI_PT_Panel_Units(bpy.types.Panel):
 		r = col.row(align = True)
 		r.prop(context.scene.texToolsSettings, "padding", text="Padding")
 		r.operator(op_uv_resize.op.bl_idname, text="Resize", icon_value = icon_get("op_extend_canvas_open"))
-		
+		#col.operator(op_extend_canvas.op.bl_idname, text="Resize", icon_value = icon_get("op_extend_canvas"))
 
-		# col.operator(op_extend_canvas.op.bl_idname, text="Resize", icon_value = icon_get("op_extend_canvas"))
-		
 
-		# UV Channel
-		
-		row = layout.row()
+		obj = bpy.context.active_object
+		if obj and (obj.mode == 'EDIT' or (bpy.context.selected_objects and obj in bpy.context.selected_objects)):
+			if obj.type == 'MESH':
 
-		has_uv_channel = False
-		if bpy.context.active_object and len(bpy.context.selected_objects) == 1:
-			if bpy.context.active_object in bpy.context.selected_objects:
-				if bpy.context.active_object.type == 'MESH':
+				row = layout.row()
+
+				if not obj.data.uv_layers:
+					row.operator(op_uv_channel_add.op.bl_idname, text="Add", icon = 'ADD')
+
+				else:
+					# UV Channel
+
+					group = row.row(align=True)
+					group.prop(context.scene.texToolsSettings, "uv_channel", text="")
+					group.operator(op_uv_channel_add.op.bl_idname, text="", icon = 'ADD')
+
+					group = row.row(align=True)
+					r = group.column(align=True)
+					r.active = obj.data.uv_layers.active_index > 0
+					r.operator(op_uv_channel_swap.op.bl_idname, text="", icon = 'TRIA_UP_BAR').is_down = False
 					
-					# split = row.split(percentage=0.25)
-					# c = row.column(align=True)
-					# r = row.row(align=True)
-					# r.alignment = 'RIGHT'
-					# r.expand =
-					# row.label(text="UV")#, icon='GROUP_UVS'
+					r = group.column(align=True)
+					r.active = obj.data.uv_layers.active_index < (len(obj.data.uv_layers)-1)
+					r.operator(op_uv_channel_swap.op.bl_idname, text="", icon = 'TRIA_DOWN_BAR').is_down = True
 
-					
-					if not bpy.context.object.data.uv_layers:
-						# c = split.column(align=True)
-						# row = c.row(align=True)
-						# row.label(text="None", icon= 'ERROR')
+					# UDIM Tiles
 
-						row.operator(op_uv_channel_add.op.bl_idname, text="Add", icon = 'REMOVE')
-					else:
-						# c = split.column(align=True)
-						# row = c.row(align=True)
-						group = row.row(align=True)
-						group.prop(context.scene.texToolsSettings, "uv_channel", text="")
-						group.operator(op_uv_channel_add.op.bl_idname, text="", icon = 'ADD')
+					row = layout.row()
+					row.prop(context.scene.texToolsSettings, "UDIMs_source", text="Tiles")
 
-						# c = split.column(align=True)
-						# row = c.row(align=True)
-						# row.alignment = 'RIGHT'
-						group = row.row(align=True)
-						r = group.column(align=True)
-						r.active = bpy.context.object.data.uv_layers.active_index > 0
-						r.operator(op_uv_channel_swap.op.bl_idname, text="", icon = 'TRIA_UP_BAR').is_down = False;
-						
-						r = group.column(align=True)
-						r.active = bpy.context.object.data.uv_layers.active_index < (len(bpy.context.object.data.uv_layers)-1)
-						r.operator(op_uv_channel_swap.op.bl_idname, text="", icon = 'TRIA_DOWN_BAR').is_down = True;
+					def get_UDIM_image():
+						for i in range(len(obj.material_slots)):
+							slot = obj.material_slots[i]
+							if slot.material:
+								tree = slot.material.node_tree
+								if tree:
+									nodes = tree.nodes
+									if nodes:
+										for node in nodes:
+											if node.type == 'TEX_IMAGE' and node.image and node.image.source =='TILED':
+												return node.image
+						return None
 
-					has_uv_channel = True
-		if not has_uv_channel:
-			row.label(text="UV")
+					if bpy.context.scene.texToolsSettings.UDIMs_source == 'OBJECT':
+						image = get_UDIM_image()
+					else:	# 'EDITOR'
+						image = context.space_data.image
+
+					if image:
+						row = layout.row(align=True)
+						col = row.column()
+						col.template_list("IMAGE_UL_udim_tiles", "", image, "tiles", image.tiles, "active_index", rows=3, maxrows=3)
 
 
 		col = layout.column(align=True)
+		row = col.row(align = True)
+		row.operator(op_texture_reload_all.op.bl_idname, text="Reload Textures", icon_value = icon_get("op_texture_reload_all"))
 
-		# col.separator()
-		col.operator(op_texture_reload_all.op.bl_idname, text="Reload Textures", icon_value = icon_get("op_texture_reload_all"))
-		
 		row = col.row(align=True)
 		row.scale_y = 1.75
 		row.operator(op_texel_checker_map.op.bl_idname, text ="Checker Map", icon_value = icon_get("op_texel_checker_map"))
-		
 
-			
-			
 
-class UI_PT_Panel_Layout(bpy.types.Panel):
+
+
+class UI_PT_Panel_Layout(Panel):
 	bl_label = " "
 	bl_space_type = 'IMAGE_EDITOR'
 	bl_region_type = 'UI'
@@ -687,24 +877,24 @@ class UI_PT_Panel_Layout(bpy.types.Panel):
 	def draw_header(self, _):
 		layout = self.layout
 		row = layout.row(align=True)
-		row.operator("wm.url_open", text="", icon='INFO').url = "http://renderhjs.net/textools/blender/index.html#uvlayout"
+		if bpy.context.preferences.addons[__package__].preferences.bool_help:
+			row.operator("wm.url_open", text="", icon='INFO').url = "http://renderhjs.net/textools/blender/index.html#uvlayout"
 		row.label(text ="UV Layout")
 
 	# def draw_header(self, _):
 	# 	layout = self.layout
 	# 	layout.label(text="", icon_value=icon("logo"))
 
-
 	def draw(self, context):
 		layout = self.layout
 		
-		
 		if bpy.app.debug_value != 0:
-			col = layout.column(align=True)
-			col.alert = True
-			row = col.row(align=True)
-			row.operator(op_island_mirror.op.bl_idname, text="Mirror", icon_value = icon_get("op_island_mirror")).is_stack = False;
-			row.operator(op_island_mirror.op.bl_idname, text="Stack", icon_value = icon_get("op_island_mirror")).is_stack = True;
+			pass
+			# col = layout.column(align=True)
+			# col.alert = True
+			# row = col.row(align=True)
+			# row.operator(op_island_mirror.op.bl_idname, text="Mirror", icon_value = icon_get("op_island_mirror")).is_stack = False
+			# row.operator(op_island_mirror.op.bl_idname, text="Stack", icon_value = icon_get("op_island_mirror")).is_stack = True
 
 		#---------- Layout ------------
 		# layout.label(text="Layout")
@@ -712,10 +902,11 @@ class UI_PT_Panel_Layout(bpy.types.Panel):
 		box = layout.box()
 		col = box.column(align=True)
 
-		if bpy.context.active_object and bpy.context.active_object.mode == 'EDIT' and bpy.context.scene.tool_settings.use_uv_select_sync:
-			row = col.row(align=True)
-			row.alert = True
-			row.operator("uv.op_disable_uv_sync", text="Disable sync", icon='CANCEL')#, icon='UV_SYNC_SELECT'
+		if bpy.context.active_object is not None:
+			if bpy.context.scene.tool_settings.use_uv_select_sync and bpy.context.active_object.mode == 'EDIT':
+				row = col.row(align=True)
+				row.alert = True
+				row.operator("uv.op_disable_uv_sync", text="Disable sync", icon='CANCEL')#, icon='UV_SYNC_SELECT'
 
 
 		row = col.row(align=True)
@@ -742,50 +933,71 @@ class UI_PT_Panel_Layout(bpy.types.Panel):
 		
 		row = col_tr.row(align=True)
 		col = row.column(align=True)
-		col.label(text="")
-		col.operator(op_align.op.bl_idname, text="←", icon_value = icon_get("op_align_left")).direction = "left"
+		# col.label(text="")
+		col.operator(op_align.op.bl_idname, text="↖", icon_value = icon_get("op_align_topleft")).direction = "topleft"
+		col.operator(op_align.op.bl_idname, text="← ", icon_value = icon_get("op_align_left")).direction = "left"
+		col.operator(op_align.op.bl_idname, text="↙", icon_value = icon_get("op_align_bottomleft")).direction = "bottomleft"
 		
 		col = row.column(align=True)
 		col.operator(op_align.op.bl_idname, text="↑", icon_value = icon_get("op_align_top")).direction = "top"
+		col.operator(op_align.op.bl_idname, text="+", icon_value = icon_get("op_align_center")).direction = "center"
 		col.operator(op_align.op.bl_idname, text="↓", icon_value = icon_get("op_align_bottom")).direction = "bottom"
 
 		col = row.column(align=True)
-		col.label(text="")
-		col.operator(op_align.op.bl_idname, text="→", icon_value = icon_get("op_align_right")).direction = "right"
+		# col.label(text="")
+		col.operator(op_align.op.bl_idname, text="↗", icon_value = icon_get("op_align_topright")).direction = "topright"
+		col.operator(op_align.op.bl_idname, text=" →", icon_value = icon_get("op_align_right")).direction = "right"
+		col.operator(op_align.op.bl_idname, text="↘", icon_value = icon_get("op_align_bottomright")).direction = "bottomright"
 
+		row_tr = col_tr.row(align=True)
+		col = row_tr.column(align=True)
+		col.scale_x = 0.5
+		row = col.row(align=True)
+		row.operator(op_align.op.bl_idname, text="—", icon_value = icon_get("op_align_horizontal")).direction = "horizontal"
+		row.operator(op_align.op.bl_idname, text="|", icon_value = icon_get("op_align_vertical")).direction = "vertical"
+		col = row_tr.column(align=True)
+		col.prop(context.scene.texToolsSettings, "align_mode", text="", expand=False)
+
+		col_tr.separator()
 		row = col_tr.row(align=True)
-		row.operator(op_island_rotate_90.op.bl_idname, text="-90°", icon_value = icon_get("op_island_rotate_90_left")).angle = -math.pi / 2
-		row.operator(op_island_rotate_90.op.bl_idname, text="+90°", icon_value = icon_get("op_island_rotate_90_right")).angle = math.pi / 2
-
-
-
+		row.operator(op_island_rotate_90.op.bl_idname, text="90° CCW", icon_value = icon_get("op_island_rotate_90_left")).angle = -math.pi / 2
+		row.operator(op_island_rotate_90.op.bl_idname, text="90° CW", icon_value = icon_get("op_island_rotate_90_right")).angle = math.pi / 2
+		row = col_tr.row(align=True)
+		row.operator(op_island_mirror.op.bl_idname, text="Mirror H", icon_value = icon_get("op_island_mirror_H")).is_vertical = False
+		row.operator(op_island_mirror.op.bl_idname, text="Mirror V", icon_value = icon_get("op_island_mirror_V")).is_vertical = True
 
 		col = box.column(align=True)
 		row = col.row(align=True)
 		op = row.operator(op_island_align_sort.op.bl_idname, text="Sort H", icon_value = icon_get("op_island_align_sort_h"))
-		op.is_vertical = False;
+		op.is_vertical = False
 		op.padding = utilities_ui.get_padding()
 		
 		op = row.operator(op_island_align_sort.op.bl_idname, text="Sort V", icon_value = icon_get("op_island_align_sort_v"))
-		op.is_vertical = True;
+		op.is_vertical = True
 		op.padding = utilities_ui.get_padding()
-
 
 		aligned = box.row(align=True)
 		col = aligned.column(align=True)
 
 		row = col.row(align=True)
+		row.operator(op_island_centralize.op.bl_idname, text="Centralize", icon_value = icon_get("op_island_centralize"))
+		row.operator(op_randomize.op.bl_idname, text="Randomize", icon_value = icon_get("op_randomize"))
+
+		col.separator()
+
+		row = col.row(align=True)
 		row.operator(op_island_straighten_edge_loops.op.bl_idname, text="Straight", icon_value = icon_get("op_island_straighten_edge_loops"))
 		row.operator(op_rectify.op.bl_idname, text="Rectify", icon_value = icon_get("op_rectify"))
-
-
-		col.operator(op_unwrap_edge_peel.op.bl_idname, text="Edge Peel", icon_value = icon_get("op_unwrap_edge_peel"))
-		
 		row = col.row(align=True)
-		row.scale_y = 1.75
+		row.scale_y = 1.25
+		row.operator(op_relax.op.bl_idname, text="Relax", icon_value = icon_get("op_relax"))
+
+		col.separator()
+		col.operator(op_unwrap_edge_peel.op.bl_idname, text="Edge Peel", icon_value = icon_get("op_unwrap_edge_peel"))
+		row = col.row(align=True)
+		row.scale_y = 1.5
 		row.operator(op_unwrap_faces_iron.op.bl_idname, text="Iron Faces", icon_value = icon_get("op_unwrap_faces_iron"))
-		
-		
+
 		col.separator()
 
 		# col = box.column(align=True)
@@ -793,16 +1005,18 @@ class UI_PT_Panel_Layout(bpy.types.Panel):
 		row.label(text="" , icon_value = icon_get("texel_density"))
 		row.separator()
 		row.prop(context.scene.texToolsSettings, "texel_density", text="")
-		row.operator(op_texel_density_get.op.bl_idname, text="", icon = 'EYEDROPPER')
+
+		row = col.row(align=True)
+		row.operator(op_texel_density_get.op.bl_idname, text="Pick", icon = 'EYEDROPPER')
+		row.prop(context.scene.texToolsSettings, "texel_get_mode", text = "", expand=False)
 
 		row = col.row(align=True)
 		row.operator(op_texel_density_set.op.bl_idname, text="Apply", icon = 'FACESEL')
-		row.prop(context.scene.texToolsSettings, "texel_mode_scale", text = "", expand=False)
+		row.prop(context.scene.texToolsSettings, "texel_set_mode", text = "", expand=False)
 
-		#---------- Selection ------------
-		
+		#---------- Selection ----------
 
-		# /box = layout.box()
+		# box = layout.box()
 		# box.label(text="Select")
 		# col = box.column(align=True)
 		col.separator()
@@ -812,14 +1026,16 @@ class UI_PT_Panel_Layout(bpy.types.Panel):
 		row.operator(op_select_islands_overlap.op.bl_idname, text="Overlap", icon_value = icon_get("op_select_islands_overlap"))
 
 		row = col.row(align=True)
-		row.operator(op_select_islands_outline.op.bl_idname, text="Bounds", icon_value = icon_get("op_select_islands_outline"))
+		row.operator(op_select_zero.op.bl_idname, text="Zero", icon_value = icon_get("op_select_zero"))
 		row.operator(op_select_islands_flipped.op.bl_idname, text="Flipped", icon_value = icon_get('op_select_islands_flipped'))
 
-		col.separator()
-		col.operator(op_smoothing_uv_islands.op.bl_idname, text="UV Smoothing", icon_value = icon_get("op_smoothing_uv_islands"))
-		
+		row = col.row(align=True)
+		row.operator(op_select_islands_outline.op.bl_idname, text="Bounds", icon_value = icon_get("op_select_islands_outline"))
 
-class UI_PT_Panel_Bake(bpy.types.Panel):
+
+
+
+class UI_PT_Panel_Bake(Panel):
 	bl_label = " "
 	bl_space_type = 'IMAGE_EDITOR'
 	bl_region_type = 'UI'
@@ -829,11 +1045,13 @@ class UI_PT_Panel_Bake(bpy.types.Panel):
 	def draw_header(self, _):
 		layout = self.layout
 		row = layout.row(align=True)
-		row.operator("wm.url_open", text="", icon='INFO').url = "http://renderhjs.net/textools/blender/index.html#texturebaking"
+		if bpy.context.preferences.addons[__package__].preferences.bool_help:
+			row.operator("wm.url_open", text="", icon='INFO').url = "http://renderhjs.net/textools/blender/index.html#texturebaking"
 		row.label(text ="Baking")
 
 	def draw(self, context):
 		layout = self.layout
+		preferences = bpy.context.preferences.addons[__package__].preferences
 		
 		#----------- Baking -------------
 		row = layout.row()
@@ -854,25 +1072,49 @@ class UI_PT_Panel_Bake(bpy.types.Panel):
 		
 		row = col.row(align=True)
 		row.scale_y = 1.75
-		row.operator(op_bake.op.bl_idname, text = "Bake {}x".format(count), icon_value = icon_get("op_bake"));
+		row.operator(op_bake.op.bl_idname, text = "Bake {}x".format(count), icon_value = icon_get("op_bake"))
+
+		bake_mode = utilities_ui.get_bake_mode()
+
+		# Warning on material or Principled BSDF node need
+		if settings.bake_error != "":
+			col.label(text=settings.bake_error, icon='ERROR')
+
+		col.separator()
+		col_tr = col.column(align=True)
+		row = col_tr.row(align=True)
+		col = row.column(align=True)
+
+		col.label(text="AA:")
+		col.label(text="CS:")
+		if preferences.bool_bake_back_color == 'CUSTOM':
+			col.label(text="BG:")
+
+		col = row.column(align=True)
+		col.scale_x = 1.75
 
 		# anti aliasing
-		col.prop(context.scene.texToolsSettings, "bake_sampling", icon_value =icon_get("bake_anti_alias"))
+		col.prop(context.scene.texToolsSettings, "bake_sampling", text="", icon_value =icon_get("bake_anti_alias"))
 		
+		# Color Space selector
+		col.prop(context.scene.texToolsSettings, "bake_color_space", text="", icon_value =icon_get("bake_color_space"))
+
+		# Background Color Picker
+		if preferences.bool_bake_back_color == 'CUSTOM':
+			col.prop(context.scene.texToolsSettings, "bake_back_color", text="")
+		
+		col = box.column(align=True)
+
 		if bpy.app.debug_value != 0:
 			row = col.row()
 			row.alert = True
 			row.prop(context.scene.texToolsSettings, "bake_force_single", text="Dither Floats")
 
-		col.separator()
 
-
-		# Collected Related Textures
-		col.separator()
-		
+		# Collected Related Textures		
 		row = col.row(align=True)
 		row.scale_y = 1.5
-		row.operator(op_texture_preview.op.bl_idname, text = "Preview Texture", icon_value = icon_get("op_texture_preview"));
+		row.operator(op_texture_preview.op.bl_idname, text = "Preview Texture", icon_value = icon_get("op_texture_preview"))
 		
 		images = utilities_bake.get_baked_images(settings.sets)
 		
@@ -895,7 +1137,7 @@ class UI_PT_Panel_Bake(bpy.types.Panel):
 				icon = 'RADIOBUT_OFF'
 				if image == image_background:
 					icon = 'RADIOBUT_ON'
-				row.operator(op_texture_select.op.bl_idname, text=image.name, icon=icon).name = image.name #, 
+				row.operator(op_texture_select.op.bl_idname, text=image.name, icon=icon).name = image.name
 	
 				row = row.row(align=True)
 				row.alignment = 'RIGHT'
@@ -913,45 +1155,53 @@ class UI_PT_Panel_Bake(bpy.types.Panel):
 			col.separator()
 
 
-
 		# Bake Mode
-		col.template_icon_view(bpy.context.scene, "TT_bake_mode")
+		col.template_icon_view(bpy.context.scene, "TT_bake_mode", scale_popup=4.5)
 
-		
 		if bpy.app.debug_value != 0:
 			row = col.row()
 			row.label(text="--> Mode: '{}'".format(bpy.context.scene.TT_bake_mode))
-
-		bake_mode = utilities_ui.get_bake_mode()
 
 		# Warning: Wrong bake mode, require 
 		if bake_mode == 'diffuse':
 			if bpy.context.scene.render.engine != 'CYCLES':
 				if bpy.context.scene.render.engine != op_bake.modes[bake_mode].engine:
 					col.label(text="Requires '{}'".format(op_bake.modes[bake_mode].engine), icon='ERROR')
-				
-				
-
 
 		# Optional Parameters
 		col.separator()
-		for set in settings.sets:
-			if len(set.objects_low) > 0 and len(set.objects_high) > 0:
-				col.prop(context.scene.texToolsSettings, "bake_ray_distance")
-				break		
+		for bset in settings.sets:
+			if len(bset.objects_high) > 0 and len(bset.objects_low) > 0:
+				col.prop(context.scene.texToolsSettings, "bake_cage_extrusion")
+				if settings.bversion >= 2.90:
+					col.prop(context.scene.texToolsSettings, "bake_ray_distance")
+				break
 
 		# Display Bake mode properties / parameters
 		if bake_mode in op_bake.modes:
-			params = op_bake.modes[bake_mode].params
-			if len(params) > 0:
-				for param in params:
-					col.prop(context.scene.texToolsSettings, param)
+			if bake_mode == 'combined':
+				col.prop(context.scene.texToolsSettings, "bake_samples")
+				col.label(text="Lighting:")
+				col.prop(bpy.context.scene.render.bake, "use_pass_direct")
+				col.prop(bpy.context.scene.render.bake, "use_pass_indirect")
+				col.label(text="Contributions:")
+				col.prop(bpy.context.scene.render.bake, "use_pass_diffuse")
+				col.prop(bpy.context.scene.render.bake, "use_pass_glossy")
+				col.prop(bpy.context.scene.render.bake, "use_pass_transmission")
+				col.prop(bpy.context.scene.render.bake, "use_pass_ambient_occlusion")
+				col.prop(bpy.context.scene.render.bake, "use_pass_emit")
+			else:
+				params = op_bake.modes[bake_mode].params
+				if len(params) > 0:
+					for param in params:
+						col.prop(context.scene.texToolsSettings, param)
 
 		# Warning about projection requirement
-		if len(settings.sets) > 0 and op_bake.modes[bake_mode].use_project == True:
-			if len(settings.sets[0].objects_low) == 0 or len(settings.sets[0].objects_high) == 0:
-				col.label(text="Need high and low", icon='ERROR')
-	
+		if op_bake.modes[bake_mode].use_project == True and len(settings.sets) > 0:
+			if len(settings.sets[0].objects_high) == 0 or len(settings.sets[0].objects_low) == 0:
+				col.label(text="Need high and low;", icon='ERROR')
+				row = col.row()
+				row.label(text="       use suffixes as _hp, _lp")
 
 
 		box = layout.box()
@@ -965,16 +1215,16 @@ class UI_PT_Panel_Bake(bpy.types.Panel):
 			count_types = {
 				'low':0, 'high':0, 'cage':0, 'float':0, 'issue':0, 
 			}
-			for set in settings.sets:
-				if set.has_issues:
+			for bset in settings.sets:
+				if bset.has_issues:
 					count_types['issue']+=1
-				if len(set.objects_low) > 0:
+				if len(bset.objects_low) > 0:
 					count_types['low']+=1
-				if len(set.objects_high) > 0:
+				if len(bset.objects_high) > 0:
 					count_types['high']+=1
-				if len(set.objects_cage) > 0:
+				if len(bset.objects_cage) > 0:
 					count_types['cage']+=1
-				if len(set.objects_float) > 0:
+				if len(bset.objects_float) > 0:
 					count_types['float']+=1
 
 			# Freeze Selection
@@ -1010,39 +1260,38 @@ class UI_PT_Panel_Bake(bpy.types.Panel):
 				split = row.split(factor=0.55)
 
 			c = split.column(align=True)
-			for s in range(0, len(settings.sets)):
-				set = settings.sets[s]
+			for s,bset in enumerate(settings.sets):
 				r = c.row(align=True)
 				r.active = not (bpy.context.scene.texToolsSettings.bake_force_single and s > 0)
 
-				if set.has_issues:
-					r.operator("uv.op_select_bake_set", text=set.name, icon='ERROR').select_set = set.name 
+				if bset.has_issues:
+					r.operator("uv.op_select_bake_set", text=bset.name, icon='ERROR').select_set = bset.name 
 				else:
-					r.operator("uv.op_select_bake_set", text=set.name).select_set = set.name 
+					r.operator("uv.op_select_bake_set", text=bset.name).select_set = bset.name 
 
 
 			c = split.column(align=True)
-			for set in settings.sets:
+			for bset in settings.sets:
 				r = c.row(align=True)
 				r.alignment = "LEFT"
 
-				if len(set.objects_low) > 0:
-					r.label(text="{}".format(len(set.objects_low)), icon_value = icon_get("bake_obj_low"))
+				if len(bset.objects_low) > 0:
+					r.label(text="{}".format(len(bset.objects_low)), icon_value = icon_get("bake_obj_low"))
 				elif count_types['low'] > 0:
 					r.label(text="")
 
-				if len(set.objects_high) > 0:
-					r.label(text="{}".format(len(set.objects_high)), icon_value = icon_get("bake_obj_high"))
+				if len(bset.objects_high) > 0:
+					r.label(text="{}".format(len(bset.objects_high)), icon_value = icon_get("bake_obj_high"))
 				elif count_types['high'] > 0:
 					r.label(text="")
 
-				if len(set.objects_float) > 0:
-					r.label(text="{}".format(len(set.objects_float)), icon_value = icon_get("bake_obj_float"))
+				if len(bset.objects_float) > 0:
+					r.label(text="{}".format(len(bset.objects_float)), icon_value = icon_get("bake_obj_float"))
 				elif count_types['float'] > 0:
 					r.label(text="")
 
-				if len(set.objects_cage) > 0:
-					r.label(text="{}".format(len(set.objects_cage)), icon_value = icon_get("bake_obj_cage"))
+				if len(bset.objects_cage) > 0:
+					r.label(text="{}".format(len(bset.objects_cage)), icon_value = icon_get("bake_obj_cage"))
 				elif count_types['cage'] > 0:
 					r.label(text="")
 
@@ -1050,24 +1299,20 @@ class UI_PT_Panel_Bake(bpy.types.Panel):
 			row = box2.row(align=True)
 			row.active = len(settings.sets) > 0
 			row.prop(context.scene.texToolsSettings, "bake_force_single", text="Single Texture")
-			if len(settings.sets) > 0 and bpy.context.scene.texToolsSettings.bake_force_single:
+			if bpy.context.scene.texToolsSettings.bake_force_single and len(settings.sets) > 0:
 				row.label(text="'{}'".format(settings.sets[0].name))
 			# else:
 			# 	row.label(text="")
 
 
-
-
 		col = box.column(align=True)
 		col.operator(op_bake_organize_names.op.bl_idname, text = "Organize {}x".format(len(bpy.context.selected_objects)), icon = 'BOOKMARKS')
-		col.operator(op_bake_explode.op.bl_idname, text = "Explode", icon_value = icon_get("op_bake_explode"));
-		
+		col.operator(op_bake_explode.op.bl_idname, text = "Explode", icon_value = icon_get("op_bake_explode"))
 
 
 
-	
 
-class UI_MT_op_color_dropdown_io(bpy.types.Menu):
+class UI_MT_op_color_dropdown_io(Menu):
 	bl_idname = "UI_MT_op_color_dropdown_io"
 	bl_label = "IO"
 
@@ -1079,7 +1324,8 @@ class UI_MT_op_color_dropdown_io(bpy.types.Menu):
 
 
 
-class UI_MT_op_color_dropdown_convert_from(bpy.types.Menu):
+
+class UI_MT_op_color_dropdown_convert_from(Menu):
 	bl_idname = "UI_MT_op_color_dropdown_convert_from"
 	bl_label = "From"
 	bl_description = "Create Color IDs from ..."
@@ -1092,7 +1338,8 @@ class UI_MT_op_color_dropdown_convert_from(bpy.types.Menu):
 			
 
 
-class UI_MT_op_color_dropdown_convert_to(bpy.types.Menu):
+
+class UI_MT_op_color_dropdown_convert_to(Menu):
 	bl_idname = "UI_MT_op_color_dropdown_convert_to"
 	bl_label = "To"
 	bl_description = "Convert Color IDs into ..."
@@ -1103,7 +1350,9 @@ class UI_MT_op_color_dropdown_convert_to(bpy.types.Menu):
 		layout.operator(op_color_convert_vertex_colors.op.bl_idname, text="Vertex Colors", icon_value = icon_get("op_color_convert_vertex_colors"))
 
 
-class UV_OT_op_enable_cycles(bpy.types.Operator):
+
+
+class UV_OT_op_enable_cycles(Operator):
 	bl_idname = "uv.textools_enable_cycles"
 	bl_label = "Enable Cycles"
 	bl_description = "Enable Cycles render engine"
@@ -1117,7 +1366,9 @@ class UV_OT_op_enable_cycles(bpy.types.Operator):
 		return {'FINISHED'}
 
 
-class UI_PT_Panel_Colors(bpy.types.Panel):
+
+
+class UI_PT_Panel_Colors(Panel):
 	bl_label = " "
 	bl_space_type = 'IMAGE_EDITOR'
 	bl_region_type = 'UI'
@@ -1127,12 +1378,12 @@ class UI_PT_Panel_Colors(bpy.types.Panel):
 	def draw_header(self, _):
 		layout = self.layout
 		row = layout.row(align=True)
-		row.operator("wm.url_open", text="", icon='INFO').url = "http://renderhjs.net/textools/blender/index.html#colorid"
+		if bpy.context.preferences.addons[__package__].preferences.bool_help:
+			row.operator("wm.url_open", text="", icon='INFO').url = "http://renderhjs.net/textools/blender/index.html#colorid"
 		row.label(text ="Color ID")
 
 	def draw(self, context):
 		layout = self.layout
-		
 		# layout.label(text="Select face and color")
 		
 		if bpy.context.scene.render.engine != 'CYCLES' and bpy.context.scene.render.engine != 'BLENDER_EEVEE':
@@ -1144,8 +1395,20 @@ class UI_PT_Panel_Colors(bpy.types.Panel):
 
 		box = layout.box()
 		col = box.column(align=True)
-		
 
+		def color_mode_icon():
+			if context.scene.texToolsSettings.color_assign_mode == 'MATERIALS':
+				return icon_get("op_color_from_materials")
+			else:
+				return icon_get("op_color_convert_vertex_colors")
+
+		row = col.row(align=True)
+		split = row.split(factor=0.25, align=True)
+		c = split.column(align=True)
+		c.label(text="Mode:")
+		c = split.column(align=True)
+		c.prop(context.scene.texToolsSettings, "color_assign_mode", text="", icon_value = color_mode_icon())
+		col.separator()
 
 		row = col.row(align=True)
 		split = row.split(factor=0.60, align=True)
@@ -1178,55 +1441,21 @@ class UI_PT_Panel_Colors(bpy.types.Panel):
 				if bpy.context.active_object:
 					if bpy.context.active_object in bpy.context.selected_objects:
 						if len(bpy.context.selected_objects) == 1:
-							if bpy.context.active_object.type == 'MESH':
+							if bpy.context.active_object.type == 'MESH' and context.scene.texToolsSettings.color_assign_mode == 'MATERIALS':
 								col.operator(op_color_select.op.bl_idname, text="", icon = "FACESEL").index = i
 			else:
 				col.label(text=" ")
 
-		
-		# split = row.split(percentage=0.25, align=True)
-		# c = split.column(align=True)
-		# c.operator(op_color_clear.op.bl_idname, text="", icon = 'X')
-		# c = split.column(align=True)
-		# c.operator(op_color_from_elements.op.bl_idname, text="Color Elements", icon_value = icon_get('op_color_from_elements'))
-		
-
-		
 		col = box.column(align=True)
-		col.label(text="Convert")
+		col.label(text="Convert:")
 		row = col.row(align=True)
-		row.menu(UI_MT_op_color_dropdown_convert_from.bl_idname)#, icon='IMPORT'
-		row.menu(UI_MT_op_color_dropdown_convert_to.bl_idname,)# icon='EXPORT'
-		
+		row.menu(UI_MT_op_color_dropdown_convert_from.bl_idname)	# icon='IMPORT'
+		row.menu(UI_MT_op_color_dropdown_convert_to.bl_idname,)		# icon='EXPORT'
 
 
 
-		# row = col.row(align=True)
-		# row.operator(op_color_convert_texture.op.bl_idname, text="From Atlas", icon_value = icon_get('op_color_convert_texture'))
-			
 
-
-		# for i in range(context.scene.texToolsSettings.color_ID_count):
-
-
-
-		# 	col = row.column(align=True)
-		# 	col.prop(context.scene.texToolsSettings, "color_ID_color_{}".format(i), text="")
-		# 	col.operator(op_color_assign.op.bl_idname, text="", icon = "FILE_TICK").index = i
-			
-		# 	if bpy.context.active_object:
-		# 		if bpy.context.active_object.type == 'MESH':
-		# 			if bpy.context.active_object.mode == 'EDIT':
-		# 				col.operator(op_color_select.op.bl_idname, text="", icon = "FACESEL").index = i
-
-		
-
-		# https://github.com/blenderskool/kaleidoscope/blob/fb5cb1ab87a57b46618d99afaf4d3154ad934529/spectrum.py
-	
-			
-
-	
-class UI_PT_Panel_MeshTexture(bpy.types.Panel):
+class UI_PT_Panel_MeshTexture(Panel):
 	bl_label = " "
 	bl_space_type = 'IMAGE_EDITOR'
 	bl_region_type = 'UI'
@@ -1236,14 +1465,15 @@ class UI_PT_Panel_MeshTexture(bpy.types.Panel):
 	def draw_header(self, _):
 		layout = self.layout
 		row = layout.row(align=True)
-		row.operator("wm.url_open", text="", icon='INFO').url = "http://renderhjs.net/textools/blender/index.html#meshtexture"
-		row.label(text ="Mesh Texture")
+		if bpy.context.preferences.addons[__package__].preferences.bool_help:
+			row.operator("wm.url_open", text="", icon='INFO').url = "http://renderhjs.net/textools/blender/index.html#meshtexture"
+		row.label(text ="Mesh UV Tools")
 
 	def draw(self, context):
 		layout = self.layout
 		box = layout.box()
-		col = box.column(align=True)
 
+		col = box.column(align=True)
 		row = col.row(align=True)
 		row.scale_y = 1.5
 		row.operator(op_meshtex_create.op.bl_idname, text="Create UV Mesh", icon_value = icon_get("op_meshtex_create"))
@@ -1265,11 +1495,15 @@ class UI_PT_Panel_MeshTexture(bpy.types.Panel):
 			row.enabled = False
 		row.prop(context.scene.texToolsSettings, "meshtexture_wrap", text="Wrap")
 
-		box.operator(op_meshtex_pattern.op.bl_idname, text="Create Pattern", icon_value = icon_get("op_meshtex_pattern"))
+		col = box.column(align=True)
+		row = col.row(align=True)
+		row.scale_y = 1.5
+		row.operator(op_meshtex_pattern.op.bl_idname, text="Create Pattern", icon_value = icon_get("op_meshtex_pattern"))
 
-
-
-
+		col = box.column(align=True)
+		row = col.row(align=True)
+		row.scale_y = 1.5
+		row.operator(op_smoothing_uv_islands.op.bl_idname, text="Smooth by UV Islands", icon_value = icon_get("op_smoothing_uv_islands"))
 
 
 keymaps = []
@@ -1277,7 +1511,6 @@ keymaps = []
 def icon_get(name):
 	return utilities_ui.icon_get(name)
 
-	
 
 def menu_IMAGE_uvs(self, context):
 	layout = self.layout
@@ -1285,19 +1518,26 @@ def menu_IMAGE_uvs(self, context):
 	layout.operator(op_uv_resize.op.bl_idname, text="Resize", icon_value = icon_get("op_extend_canvas_open"))
 	layout.operator(op_rectify.op.bl_idname, text="Rectify", icon_value = icon_get("op_rectify"))
 	layout.operator(op_uv_crop.op.bl_idname, text="Crop", icon_value = icon_get("op_uv_crop"))
-	layout.operator(op_uv_fill.op.bl_idname, text="Crop", icon_value = icon_get("op_uv_fill"))
+	layout.operator(op_uv_fill.op.bl_idname, text="Fill", icon_value = icon_get("op_uv_fill"))
+	layout.operator(op_relax.op.bl_idname, text="Relax", icon_value = icon_get("op_relax"))
 
 	layout.separator()
 	layout.operator(op_island_align_sort.op.bl_idname, text="Sort H", icon_value = icon_get("op_island_align_sort_h"))
 	layout.operator(op_island_align_sort.op.bl_idname, text="Sort V", icon_value = icon_get("op_island_align_sort_v"))
 		
 	layout.separator()
+	layout.menu("VIEW3D_MT_submenu_align")
 	layout.operator(op_island_align_edge.op.bl_idname, text="Align Edge", icon_value = icon_get("op_island_align_edge"))
 	layout.operator(op_island_align_world.op.bl_idname, text="Align World", icon_value = icon_get("op_island_align_world"))
 
-	layout.menu(VIEW3D_MT_submenu_align)
+	layout.separator()
+	layout.operator(op_island_centralize.op.bl_idname, text="Centralize Position", icon_value = icon_get("op_island_centralize"))
+	layout.operator(op_randomize.op.bl_idname, text="Randomize Position", icon_value = icon_get("op_randomize"))
 
-class VIEW3D_MT_submenu_align(bpy.types.Menu):
+
+
+
+class VIEW3D_MT_submenu_align(Menu):
 	bl_label="Align"
 	bl_idname="VIEW3D_MT_submenu_align"
 	def draw(self, context):
@@ -1307,48 +1547,51 @@ class VIEW3D_MT_submenu_align(bpy.types.Menu):
 		layout.operator(op_align.op.bl_idname, text="↓", icon_value = icon_get("op_align_bottom")).direction = "bottom"
 		layout.operator(op_align.op.bl_idname, text="→", icon_value = icon_get("op_align_right")).direction = "right"
 
+
+
 def menu_IMAGE_select(self, context):
 	layout = self.layout
 	layout.separator()
 	layout.operator(op_select_islands_identical.op.bl_idname, text="Similar", icon_value = icon_get("op_select_islands_identical"))
 	layout.operator(op_select_islands_overlap.op.bl_idname, text="Overlap", icon_value = icon_get("op_select_islands_overlap"))
-	layout.operator(op_select_islands_outline.op.bl_idname, text="Bounds", icon_value = icon_get("op_select_islands_outline"))
+	layout.operator(op_select_zero.op.bl_idname, text="Zero", icon_value = icon_get("op_select_zero"))
 	layout.operator(op_select_islands_flipped.op.bl_idname, text="Flipped", icon_value = icon_get('op_select_islands_flipped'))
+	layout.operator(op_select_islands_outline.op.bl_idname, text="Bounds", icon_value = icon_get("op_select_islands_outline"))
 	
 def menu_IMAGE_MT_image(self, context):
 	layout = self.layout
 	layout.separator()
 	layout.operator(op_texture_reload_all.op.bl_idname, text="Reload Textures", icon_value = icon_get("op_texture_reload_all"))
 	layout.operator(op_texel_checker_map.op.bl_idname, text ="Checker Map", icon_value = icon_get("op_texel_checker_map"))
-	layout.operator(op_texture_preview.op.bl_idname, text = "Preview Texture", icon_value = icon_get("op_texture_preview"));
+	layout.operator(op_texture_preview.op.bl_idname, text = "Preview Texture", icon_value = icon_get("op_texture_preview"))
 		
 def menu_VIEW3D_MT_object(self, context):
 	self.layout.separator()
 	self.layout.operator(op_texel_checker_map.op.bl_idname, text ="Checker Map", icon_value = icon_get("op_texel_checker_map"))
 	self.layout.operator(op_meshtex_create.op.bl_idname, text="Create UV Mesh", icon_value = icon_get("op_meshtex_create"))
-	
+	self.layout.operator(op_smoothing_uv_islands.op.bl_idname, text="Smooth by UV Islands", icon_value = icon_get("op_smoothing_uv_islands"))
+
 def menu_VIEW3D_MT_mesh_add(self, context):
 	self.layout.operator(op_meshtex_pattern.op.bl_idname, text="Create Pattern", icon_value = icon_get("op_meshtex_pattern"))
 
 def menu_VIEW3D_MT_uv_map(self, context):
 	layout = self.layout
 	layout.separator()
-	layout.operator(op_unwrap_edge_peel.op.bl_idname, text="Peel Edge", icon_value = icon_get("op_unwrap_edge_peel"))
+	layout.operator(op_unwrap_edge_peel.op.bl_idname, text="Edge Peel", icon_value = icon_get("op_unwrap_edge_peel"))
 	layout.operator(op_unwrap_faces_iron.op.bl_idname, text="Iron Faces", icon_value = icon_get("op_unwrap_faces_iron"))
-	layout.operator(op_smoothing_uv_islands.op.bl_idname, text="UV Smoothing", icon_value = icon_get("op_smoothing_uv_islands"))
-		
+
 def menu_VIEW3D_MT_object_context_menu(self, context):
 	layout = self.layout
 	layout.separator()
 	layout.operator(op_meshtex_create.op.bl_idname, text="Create UV Mesh", icon_value = icon_get("op_meshtex_create"))
-	layout.operator(op_meshtex_trim.op.bl_idname, text="Trim", icon_value = icon_get("op_meshtex_trim"))
+	# layout.operator(op_meshtex_trim.op.bl_idname, text="Trim", icon_value = icon_get("op_meshtex_trim"))
+	# # Warning about trimmed mesh
+	# if op_meshtex_trim_collapse.is_available():
+	# 	layout.operator(op_meshtex_trim_collapse.op.bl_idname, text="Collapse Trim", icon='CANCEL')
+	# layout.prop(context.scene.texToolsSettings, "meshtexture_wrap", text="Wrap")
+	# layout.operator(op_meshtex_wrap.op.bl_idname, text="Wrap", icon_value = icon_get("op_meshtex_wrap"))
+	layout.operator(op_smoothing_uv_islands.op.bl_idname, text="Smooth by UV Islands", icon_value = icon_get("op_smoothing_uv_islands"))
 
-	# Warning about trimmed mesh
-	if op_meshtex_trim_collapse.is_available():
-		layout.operator(op_meshtex_trim_collapse.op.bl_idname, text="Collapse Trim", icon='CANCEL')
-
-	layout.prop(context.scene.texToolsSettings, "meshtexture_wrap", text="Wrap")
-	layout.operator(op_meshtex_wrap.op.bl_idname, text="Wrap", icon_value = icon_get("op_meshtex_wrap"))
 
 
 classes = (
@@ -1372,65 +1615,79 @@ classes = (
 )
 
 
+
 def register():
 	from bpy.utils import register_class
 	for cls in classes:
 		register_class(cls)
 
 #Register settings
-	bpy.types.Scene.texToolsSettings = bpy.props.PointerProperty(type=TexToolsSettings)
+	bpy.types.Scene.texToolsSettings = PointerProperty(type=TexToolsSettings)
 
 	#GUI Utilities
 	utilities_ui.register()
 
 	# Register Icons
 	icons = [
-		"bake_anti_alias.png", 
-		"bake_obj_cage.png", 
-		"bake_obj_float.png", 
-		"bake_obj_high.png", 
-		"bake_obj_low.png", 
-		"op_align_bottom.png", 
-		"op_align_left.png", 
-		"op_align_right.png", 
-		"op_align_top.png", 
-		"op_bake.png", 
-		"op_bake_explode.png", 
-		"op_color_convert_texture.png", 
-		"op_color_convert_vertex_colors.png", 
-		"op_color_from_directions.png", 
-		"op_color_from_elements.png", 
-		"op_color_from_materials.png", 
-		"op_extend_canvas_open.png",
-		"op_island_align_edge.png", 
-		"op_island_align_sort_h.png", 
-		"op_island_align_sort_v.png", 
-		"op_island_align_world.png", 
-		"op_island_mirror.png", 
-		"op_island_rotate_90_left.png", 
-		"op_island_rotate_90_right.png", 
-		"op_island_straighten_edge_loops.png", 
-		"op_meshtex_create.png",
-		"op_meshtex_pattern.png",
-		"op_meshtex_trim.png",
-		"op_meshtex_trim_collapse.png", 
-		"op_meshtex_wrap.png",
-		"op_rectify.png", 
-		"op_select_islands_flipped.png", 
-		"op_select_islands_identical.png", 
-		"op_select_islands_outline.png", 
-		"op_select_islands_overlap.png", 
-		"op_smoothing_uv_islands.png", 
-		"op_texel_checker_map.png", 
-		"op_texture_preview.png", 
-		"op_texture_reload_all.png",
-		"op_texture_save.png",
-		"op_texture_open.png",
-		"op_unwrap_faces_iron.png", 
-		"op_unwrap_edge_peel.png", 
-		"op_uv_crop.png", 
-		"op_uv_fill.png", 
-		"texel_density.png"
+		"bake_anti_alias.bip", 
+		"bake_color_space.bip", 
+		"bake_obj_cage.bip", 
+		"bake_obj_float.bip", 
+		"bake_obj_high.bip", 
+		"bake_obj_low.bip", 
+		"op_align_bottom.bip", 
+		"op_align_topleft.bip", 
+		"op_align_left.bip", 
+		"op_align_bottomleft.bip", 
+		"op_align_topright.bip", 
+		"op_align_right.bip", 
+		"op_align_bottomright.bip", 
+		"op_align_top.bip",
+		"op_align_horizontal.bip",
+		"op_align_vertical.bip",
+		"op_align_center.bip",		 
+		"op_bake.bip", 
+		"op_bake_explode.bip", 
+		"op_color_convert_texture.bip", 
+		"op_color_convert_vertex_colors.bip", 
+		"op_color_from_directions.bip", 
+		"op_color_from_elements.bip", 
+		"op_color_from_materials.bip", 
+		"op_extend_canvas_open.bip",
+		"op_island_align_edge.bip", 
+		"op_island_align_sort_h.bip", 
+		"op_island_align_sort_v.bip", 
+		"op_island_align_world.bip", 
+		"op_island_mirror_H.bip", 
+		"op_island_mirror_V.bip", 
+		"op_island_rotate_90_left.bip", 
+		"op_island_rotate_90_right.bip", 
+		"op_island_straighten_edge_loops.bip", 
+		"op_meshtex_create.bip",
+		"op_meshtex_pattern.bip",
+		"op_meshtex_trim.bip",
+		"op_meshtex_trim_collapse.bip", 
+		"op_meshtex_wrap.bip",
+		"op_island_centralize.bip",
+		"op_randomize.bip",
+		"op_rectify.bip", 
+		"op_relax.bip", 
+		"op_select_islands_flipped.bip", 
+		"op_select_zero.bip", 
+		"op_select_islands_identical.bip", 
+		"op_select_islands_outline.bip", 
+		"op_select_islands_overlap.bip", 
+		"op_smoothing_uv_islands.bip", 
+		"op_texel_checker_map.bip", 
+		"op_texture_preview.bip", 
+		"op_texture_reload_all.bip",
+		"op_texture_save.bip",
+		"op_texture_open.bip",
+		"op_unwrap_faces_iron.bip", 
+		"op_unwrap_edge_peel.bip", 
+		"op_uv_crop.bip", 
+		"op_uv_fill.bip", 
+		"texel_density.bip"
 	]
 	for icon in icons:
 		utilities_ui.icon_register(icon)
@@ -1443,7 +1700,6 @@ def register():
 	bpy.types.VIEW3D_MT_uv_map.append(menu_VIEW3D_MT_uv_map)
 	bpy.types.VIEW3D_MT_object_context_menu.append(menu_VIEW3D_MT_object_context_menu)
 	
-
 
 
 def unregister():
@@ -1469,8 +1725,7 @@ def unregister():
 	bpy.types.VIEW3D_MT_add.remove(menu_VIEW3D_MT_mesh_add)
 	bpy.types.VIEW3D_MT_uv_map.remove(menu_VIEW3D_MT_uv_map)
 	bpy.types.VIEW3D_MT_object_context_menu.remove(menu_VIEW3D_MT_object_context_menu)
-	
-	
+
 
 if __name__ == "__main__":
 	register()

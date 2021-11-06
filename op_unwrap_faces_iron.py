@@ -1,14 +1,13 @@
 import bpy
-import os
 import bmesh
-from mathutils import Vector
-from collections import defaultdict
-from math import pi
 
+from mathutils import Vector
 from . import utilities_uv
+from . import utilities_ui
+
+
 
 class op(bpy.types.Operator):
-	"""UV Operator description"""
 	bl_idname = "uv.textools_unwrap_faces_iron"
 	bl_label = "Iron"
 	bl_description = "Unwrap selected faces into a single UV island"
@@ -16,49 +15,29 @@ class op(bpy.types.Operator):
 	
 	@classmethod
 	def poll(cls, context):
-
 		if not bpy.context.active_object:
 			return False
-
 		if bpy.context.active_object.type != 'MESH':
 			return False
-
-		#Only in Edit mode
 		if bpy.context.active_object.mode != 'EDIT':
 			return False
-
-		# Need view Face mode
-		if tuple(bpy.context.scene.tool_settings.mesh_select_mode)[2] == False:
-			return False
-		#Only in UV editor mode
-		# if bpy.context.area.type != 'IMAGE_EDITOR':
-		# 	return False
-
-		#Requires UV map
-		# if not bpy.context.object.data.uv_layers:
-		# 	return False
-
-		# if bpy.context.scene.tool_settings.uv_select_mode != 'FACE':
-		#  	return False
 		return True
 
+
 	def execute(self, context):
-		main(context)
+		udim_tile, column, row = utilities_uv.get_UDIM_tile_coords(bpy.context.active_object)
+		utilities_uv.multi_object_loop(main, self, context, udim_tile, column, row)
 		return {'FINISHED'}
 
 
-def main(context):
-	print("operatyor_faces_iron()")
 
-	#Store selection
-	utilities_uv.selection_store()
+def main(self, context, udim_tile, column, row):
+	pre_selection_mode = tuple(bpy.context.scene.tool_settings.mesh_select_mode)
+	me = bpy.context.active_object.data
+	bm = bmesh.from_edit_mesh(me)
 
-	bm = bmesh.from_edit_mesh(bpy.context.active_object.data)
-	uv_layers = bm.loops.layers.uv.verify()
-
-	bpy.context.scene.tool_settings.uv_select_mode = 'FACE'
+	bpy.ops.mesh.select_mode(use_extend=False, use_expand=False, type='FACE')
 	bpy.ops.mesh.mark_seam(clear=True)
-
 
 	selected_faces = [f for f in bm.faces if f.select]
 
@@ -67,10 +46,30 @@ def main(context):
 	bpy.ops.mesh.region_to_loop()
 	bpy.ops.mesh.mark_seam(clear=False)
 
-	bpy.ops.mesh.select_mode(use_extend=False, use_expand=False, type='FACE')
+	seams = False
 	for face in selected_faces:
-		face.select = True
-		
-	bpy.ops.uv.unwrap(method='ANGLE_BASED', margin=0.0226216)
+		face.select_set(True)
+		if not seams:
+			for edge in face.edges:
+				if edge.seam:
+					seams = True
+					break
+	if not seams:
+		self.report({'INFO'}, "Unwrap not possible; don't select the entire object if it is manifold")
+		return
+
+	padding = utilities_ui.get_padding()
+	bpy.ops.uv.unwrap(method='ANGLE_BASED', margin=padding)
+
+	# Move to active UDIM Tile TODO unwrap in the active UDIM Tile when implemented in Blender master (watch out for versioning)
+	uv_layers = bm.loops.layers.uv.verify()
+
+	if udim_tile != 1001:
+		for face in selected_faces:
+			for loop in face.loops:
+				loop[uv_layers].uv += Vector((column, row))
+
+	bpy.context.scene.tool_settings.mesh_select_mode = pre_selection_mode
+
 
 bpy.utils.register_class(op)

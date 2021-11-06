@@ -1,12 +1,9 @@
 import bpy
 import bmesh
-import operator
-from mathutils import Vector
-from collections import defaultdict
-from math import pi
 
 from . import utilities_uv
-from . import utilities_ui
+
+
 
 class op(bpy.types.Operator):
 	bl_idname = "uv.textools_select_islands_outline"
@@ -16,99 +13,70 @@ class op(bpy.types.Operator):
 
 	@classmethod
 	def poll(cls, context):
+		if bpy.context.area.type != 'IMAGE_EDITOR':
+			return False
 		if not bpy.context.active_object:
 			return False
-		
+		if bpy.context.active_object.mode != 'EDIT':
+			return False
 		if bpy.context.active_object.type != 'MESH':
 			return False
-
-		#Requires UV map
 		if not bpy.context.object.data.uv_layers:
 			return False
-
-		# #requires UV_sync
-		# if not bpy.context.scene.tool_settings.use_uv_select_sync:
-		# 	return False
-
 		return True
 
 
 	def execute(self, context):
-		select_outline(context)
+		utilities_uv.multi_object_loop(select_outline, self, context)
 		return {'FINISHED'}
 
 
-def select_outline(context):
 
-	#Only in Edit mode
-	if bpy.context.active_object.mode != 'EDIT':
-		bpy.ops.object.mode_set(mode='EDIT')
+def select_outline(self, context, bm=None, uv_layers=None):
+	if bm is None:
+		bm = bmesh.from_edit_mesh(bpy.context.active_object.data)
+		uv_layers = bm.loops.layers.uv.verify()
 
-	bm = bmesh.from_edit_mesh(bpy.context.active_object.data);
-	uv_layers = bm.loops.layers.uv.verify();
+	sync = bpy.context.scene.tool_settings.use_uv_select_sync
 
-	pre_sync = bpy.context.scene.tool_settings.use_uv_select_sync
-	if bpy.context.scene.tool_settings.use_uv_select_sync:
-		bpy.ops.mesh.select_mode(use_extend=False, use_expand=False, type='FACE')
-		bpy.ops.uv.select_linked()
-		bpy.context.scene.tool_settings.use_uv_select_sync = False
-		bpy.ops.uv.select_all(action='SELECT')
+	if sync:
+		selected_loops = {l for e in bm.edges for l in e.link_loops if e.select}
 	else:
-		current_edit = tuple(bpy.context.tool_settings.mesh_select_mode)
-		bpy.ops.mesh.select_mode(use_extend=False, use_expand=False, type='FACE')
-		current_select = [f for f in bm.faces if f.select]
-
-	islands = utilities_uv.getSelectionIslands()
-	faces_islands = [face for island in islands for face in island]
-	edges_islands = [edge for island in islands for face in island for edge in face.edges]
-	bpy.ops.mesh.select_mode(use_extend=False, use_expand=False, type='EDGE')
-	bpy.ops.mesh.select_all(action='DESELECT')
+		selected_loops = {l for f in bm.faces for l in f.loops if l[uv_layers].select and l.link_loop_next[uv_layers].select and l.edge.select}
 
 	# Store previous edge seams
-	edges_seam = [edge for edge in bm.edges if edge.seam]
+	edges_seam = {l.edge for l in selected_loops if l.edge.seam}
 	
-
-	contextViewUV = utilities_ui.GetContextViewUV()
-	if not contextViewUV:
-		self.report({'ERROR_INVALID_INPUT'}, "This tool requires an available UV/Image view.")
-		return
-
-	# Create seams from islands
-	bpy.ops.uv.seams_from_islands(contextViewUV)
-	edges_seams_from_islands = [edge for edge in bm.edges if edge.seam]
-
-	# Clear seams
-	for edge in edges_seams_from_islands:
+	# Clear original seams
+	for edge in edges_seam:
 		edge.seam = False
 
-	if pre_sync:
-		# Select seams from islands edges and edge boundaries
-		for edge in edges_islands:
-			if edge.is_boundary or edge in edges_seams_from_islands:
-				edge.select = True
-	else:
-		for face in current_select:
-			face.select = True
-		bpy.context.tool_settings.mesh_select_mode = current_edit
-		bpy.ops.uv.select_all(action='DESELECT')
-		edges = []
-		for edge in edges_islands:
-			if edge.is_boundary or edge in edges_seams_from_islands:
-				edges.extend([e for e in edge.verts[0].link_loops])
-				edges.extend([e for e in edge.verts[1].link_loops])
-				#edges.append(edge)
-		
-		bpy.context.scene.tool_settings.uv_select_mode = 'EDGE'
-		for face in faces_islands:
-			for loop in face.loops:
-				if loop in edges:
-					loop[uv_layers].select = True
+	bpy.ops.uv.seams_from_islands(mark_seams=True, mark_sharp=False)
 
+	if sync:
+		boundary_edges = {l.edge for l in selected_loops if l.edge.seam or l.edge.is_boundary}
+	else:
+		boundary_loops = {l for l in selected_loops if l.edge.seam or l.edge.is_boundary}
+		boundary_edges = {l.edge for l in boundary_loops}
+
+	# Select bound edges from edges marked as seams and edge boundaries
+	if sync:
+		bpy.ops.mesh.select_all(action='DESELECT')
+		bpy.ops.mesh.select_mode(use_extend=False, use_expand=False, type='EDGE')
+		for edge in boundary_edges:
+			edge.select_set(True)
+	else:
+		bpy.ops.uv.select_all(action='DESELECT')
+		bpy.context.scene.tool_settings.uv_select_mode = 'EDGE'
+		for loop in boundary_loops:
+			loop[uv_layers].select = True
+			loop.link_loop_next[uv_layers].select = True
 
 	# Restore seam selection
+	for edge in boundary_edges:
+		edge.seam = False
 	for edge in edges_seam:
 		edge.seam = True
 
-	bpy.context.scene.tool_settings.use_uv_select_sync = pre_sync
 
 bpy.utils.register_class(op)

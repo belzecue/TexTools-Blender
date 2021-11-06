@@ -1,12 +1,8 @@
 import bpy
-import bmesh
-import operator
-import math
-from mathutils import Vector
-from collections import defaultdict
-from math import pi
 
-from . import utilities_uv
+from . import settings
+
+
 
 class op(bpy.types.Operator):
 	bl_idname = "uv.textools_island_rotate_90"
@@ -16,66 +12,32 @@ class op(bpy.types.Operator):
 	
 	angle : bpy.props.FloatProperty(name="Angle")
 
-
 	@classmethod
 	def poll(cls, context):
-		#Only in UV editor mode
 		if bpy.context.area.type != 'IMAGE_EDITOR':
 			return False
-
 		if not bpy.context.active_object:
 			return False
-
 		if bpy.context.active_object.type != 'MESH':
 			return False
-
-		#Only in Edit mode
 		if bpy.context.active_object.mode != 'EDIT':
 			return False
-
-		#Requires UV map
 		if not bpy.context.object.data.uv_layers:
 			return False
-			
-		# Not in Synced mode
 		if bpy.context.scene.tool_settings.use_uv_select_sync:
 			return False
-
 		return True
 
 
 	def execute(self, context):
+		bpy.ops.uv.select_linked()
 
-		main(context, self.angle)
+		angle = - self.angle
+		if settings.bversion == 2.83 or settings.bversion == 2.91:
+			angle = -angle
+		bpy.ops.transform.rotate(value=-angle, orient_axis='Z', constraint_axis=(False, False, False), use_proportional_edit=False)
+
 		return {'FINISHED'}
 
-
-def main(context, angle):
-	
-	#Store selection
-	utilities_uv.selection_store()
-
-	bm = bmesh.from_edit_mesh(bpy.context.active_object.data)
-	uv_layers = bm.loops.layers.uv.verify()
-	
-	bpy.ops.uv.select_linked()
-
-	#Bounds
-	bounds_initial = utilities_uv.getSelectionBBox()
-	bpy.ops.transform.rotate(value=angle, orient_axis='Z', constraint_axis=(False, False, False), use_proportional_edit=False)
-
-	#Align rotation to top left|right
-	bounds_post = utilities_uv.getSelectionBBox()
-	dy = bounds_post['max'].y - bounds_initial['max'].y
-	dx = 0
-	if angle > 0:
-		dx = bounds_post['max'].x - bounds_initial['max'].x
-	else:
-		dx = bounds_post['min'].x - bounds_initial['min'].x
-	bpy.ops.transform.translate(value=(-dx, -dy, 0), constraint_axis=(False, False, False), use_proportional_edit=False)
-
-
-	#Restore selection
-	utilities_uv.selection_restore()
 
 bpy.utils.register_class(op)

@@ -1,15 +1,13 @@
 import bpy
 import bmesh
-import operator
-import math
-from mathutils import Vector
-from collections import defaultdict
 
 from . import utilities_color
 from . import utilities_bake
-from . import utilities_ui
+
 
 gamma = 2.2
+
+
 
 class op(bpy.types.Operator):
 	bl_idname = "uv.textools_color_convert_to_vertex_colors"
@@ -17,27 +15,21 @@ class op(bpy.types.Operator):
 	bl_description = "Pack ID Colors into single texture and UVs"
 	bl_options = {'REGISTER', 'UNDO'}
 	
-
 	@classmethod
 	def poll(cls, context):
 		if not bpy.context.active_object:
 			return False
-
 		if bpy.context.active_object not in bpy.context.selected_objects:
 			return False
-
 		if len(bpy.context.selected_objects) != 1:
 			return False
-
 		if bpy.context.active_object.type != 'MESH':
 			return False
-
-		#Only in UV editor mode
 		if bpy.context.area.type != 'IMAGE_EDITOR':
 			return False
-
 		return True
-	
+
+
 	def execute(self, context):
 		convert_vertex_colors(self, context)
 		return {'FINISHED'}
@@ -65,6 +57,8 @@ def convert_vertex_colors(self, context):
 			color[0] = pow(color[0],1/gamma)
 			color[1] = pow(color[1],1/gamma)
 			color[2] = pow(color[2],1/gamma)
+			
+			utilities_bake.assign_vertex_color(obj)
 
 			bpy.ops.object.mode_set(mode='VERTEX_PAINT')
 			bpy.context.tool_settings.vertex_paint.brush.color = color
@@ -75,16 +69,24 @@ def convert_vertex_colors(self, context):
 	bpy.ops.object.mode_set(mode='VERTEX_PAINT')
 	bpy.context.object.data.use_paint_mask = False
 
+	# Switch Properties Tab
+	for area in bpy.context.screen.areas:
+		if area.type == 'PROPERTIES':
+			for space in area.spaces:
+				if space.type == 'PROPERTIES':
+					space.context = 'DATA'
+
 	# Switch textured shading
 	for area in bpy.context.screen.areas:
 		if area.type == 'VIEW_3D':
 			for space in area.spaces:
 				if space.type == 'VIEW_3D':
-					space.shading.type = 'MATERIAL'
+					space.shading.type = 'SOLID'
 
-	# Clear any materials
-	bpy.ops.uv.textools_color_clear()
+	# Clear materials?
+	#bpy.ops.uv.textools_color_clear()
 
 	bpy.ops.ui.textools_popup('INVOKE_DEFAULT', message="Vertex colors assigned")
+
 
 bpy.utils.register_class(op)

@@ -1,16 +1,15 @@
 import bpy
 import bmesh
-import operator
 import math
-from mathutils import Vector
-from collections import defaultdict
 
 from . import utilities_color
 from . import utilities_bake
-from . import utilities_ui
+
 
 material_prefix = "TT_atlas_"
 gamma = 2.2
+
+
 
 class op(bpy.types.Operator):
 	bl_idname = "uv.textools_color_convert_to_texture"
@@ -18,27 +17,21 @@ class op(bpy.types.Operator):
 	bl_description = "Pack ID Colors into single texture and UVs"
 	bl_options = {'REGISTER', 'UNDO'}
 	
-
 	@classmethod
 	def poll(cls, context):
 		if not bpy.context.active_object:
 			return False
-
 		if bpy.context.active_object not in bpy.context.selected_objects:
 			return False
-
 		if len(bpy.context.selected_objects) != 1:
 			return False
-
 		if bpy.context.active_object.type != 'MESH':
 			return False
-
-		#Only in UV editor mode
 		if bpy.context.area.type != 'IMAGE_EDITOR':
 			return False
-
 		return True
 	
+
 	def execute(self, context):
 		pack_texture(self, context)
 		return {'FINISHED'}
@@ -51,7 +44,6 @@ def pack_texture(self, context):
 
 	if obj.mode != 'OBJECT':
 		bpy.ops.object.mode_set(mode='OBJECT')
-
 
 	# Determine size
 	size_pixel = 8
@@ -112,7 +104,7 @@ def pack_texture(self, context):
 
 
 	bm = bmesh.from_edit_mesh(bpy.context.active_object.data)
-	uv_layers = bm.loops.layers.uv.verify();
+	uv_layers = bm.loops.layers.uv.verify()
 
 	for face in bm.faces:
 		index = face.material_index
@@ -145,7 +137,12 @@ def pack_texture(self, context):
 		if area.type == 'VIEW_3D':
 			for space in area.spaces:
 				if space.type == 'VIEW_3D':
-					space.shading.type = 'MATERIAL'
+					if space.shading.type == 'RENDERED':
+						continue
+					elif space.shading.type == 'MATERIAL':
+						continue
+					space.shading.type = 'SOLID'
+					space.shading.color_type = 'TEXTURE'
 
 	bpy.ops.ui.textools_popup('INVOKE_DEFAULT', message="Packed texture with {} color IDs".format( context.scene.texToolsSettings.color_ID_count ))
 

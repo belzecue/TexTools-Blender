@@ -1,9 +1,6 @@
 import bpy
-import os
-import bmesh
-from mathutils import Vector
-from collections import defaultdict
-from math import pi
+
+
 
 class op(bpy.types.Operator):
 	bl_idname = "uv.textools_texture_reload_all"
@@ -14,9 +11,11 @@ class op(bpy.types.Operator):
 	def poll(cls, context):
 		return True
 
+
 	def execute(self, context):
 		main(context)
 		return {'FINISHED'}
+
 
 
 def main(context):
@@ -27,15 +26,13 @@ def main(context):
 	for material in bpy.data.materials:
 		if not material.users:
 			count_clear_mat+=1
-			material.user_clear()
-			bpy.data.materials.remove(material)
+			bpy.data.materials.remove(material, do_unlink=True)
 
 	# Clean up unused images
 	for image in bpy.data.images:
 		if not image.users:
 			count_clear_img+=1
-			image.user_clear()
-			bpy.data.images.remove(image)
+			bpy.data.images.remove(image, do_unlink=True)
 
 	#Reload all File images
 	for img in bpy.data.images :
@@ -60,5 +57,6 @@ def main(context):
 
 	if len(message) > 0:
 		bpy.ops.ui.textools_popup('INVOKE_DEFAULT', message=message)
-	
+
+
 bpy.utils.register_class(op)	

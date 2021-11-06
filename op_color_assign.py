@@ -1,11 +1,12 @@
 import bpy
 import bmesh
-import operator
-from mathutils import Vector
-from collections import defaultdict
-from math import pi
 
 from . import utilities_color
+
+
+gamma = 2.2
+
+
 
 class op(bpy.types.Operator):
 	bl_idname = "uv.textools_color_assign"
@@ -19,19 +20,15 @@ class op(bpy.types.Operator):
 	def poll(cls, context):
 		if not bpy.context.active_object:
 			return False
-
 		if bpy.context.active_object not in bpy.context.selected_objects:
 			return False
-
 		if bpy.context.active_object.type != 'MESH':
 			return False
-
-		#Only in UV editor mode
 		if bpy.context.area.type != 'IMAGE_EDITOR':
 			return False
-
 		return True
 	
+
 	def execute(self, context):
 		assign_color(self, context, self.index)
 		return {'FINISHED'}
@@ -39,7 +36,6 @@ class op(bpy.types.Operator):
 
 
 def assign_color(self, context, index):
-	
 	selected_obj = bpy.context.selected_objects.copy()
 
 	previous_mode = 'OBJECT'
@@ -56,37 +52,48 @@ def assign_color(self, context, index):
 
 		# Enter Edit mode
 		bpy.ops.object.mode_set(mode='EDIT')
-		bm = bmesh.from_edit_mesh(obj.data);
-		faces = []
-
-		#Assign to all or just selected faces?
-		if previous_mode == 'EDIT':
-			faces = [face for face in bm.faces if face.select]
-		else:
-			faces = [face for face in bm.faces]		
+		bm = bmesh.from_edit_mesh(obj.data)
 
 		if previous_mode == 'OBJECT':
 			bpy.ops.mesh.select_all(action='SELECT')
 		
+		if bpy.context.scene.texToolsSettings.color_assign_mode == 'MATERIALS':
+			# Verify material slots
+			for i in range(index+1):
+				if index >= len(obj.material_slots):
+					bpy.ops.object.material_slot_add()
 
-		# Verify material slots
-		for i in range(index+1):
-			if index >= len(obj.material_slots):
-				bpy.ops.object.material_slot_add()
+			utilities_color.assign_slot(obj, index)
 
-		utilities_color.assign_slot(obj, index)
+			# Assign to selection
+			obj.active_material_index = index
+			bpy.ops.object.material_slot_assign()
+		
+		else:	#mode == VERTEXCOLORS
+			color = utilities_color.get_color(index).copy()
+			# Fix Gamma
+			color[0] = pow(color[0],1/gamma)
+			color[1] = pow(color[1],1/gamma)
+			color[2] = pow(color[2],1/gamma)
 
-		# Assign to selection
-		obj.active_material_index = index
-		bpy.ops.object.material_slot_assign()
+			# Manage Vertex Color layer
+			if len(obj.data.vertex_colors) > 0 :
+				vclsNames = [vcl.name for vcl in obj.data.vertex_colors]
+				if 'TexTools_colorID' in vclsNames:
+					obj.data.vertex_colors['TexTools_colorID'].active = True
+				else:
+					obj.data.vertex_colors.new(name='TexTools_colorID')
+					obj.data.vertex_colors['TexTools_colorID'].active = True
+			else:
+				obj.data.vertex_colors.new(name='TexTools_colorID')
 
+			# Paint
+			bpy.ops.object.mode_set(mode='VERTEX_PAINT')
+			bpy.context.tool_settings.vertex_paint.brush.color = color
+			bpy.context.object.data.use_paint_mask = True
+			bpy.ops.paint.vertex_color_set()
+			bpy.context.object.data.use_paint_mask = False
 
-	#Change View mode to MATERIAL
-	# for area in bpy.context.screen.areas:
-	# 	if area.type == 'VIEW_3D':
-	# 		for space in area.spaces:
-	# 			if space.type == 'VIEW_3D':
-	# 				space.shading.type = 'MATERIAL'
 
 	# restore mode
 	bpy.ops.object.mode_set(mode='OBJECT')
@@ -95,4 +102,11 @@ def assign_color(self, context, index):
 		obj.select_set( state = True, view_layer = None)
 	bpy.ops.object.mode_set(mode=previous_mode)
 
-bpy.utils.register_class(op)	
+	# Show Material or Data Tab
+	utilities_color.update_properties_tab()
+
+	#Change View mode
+	utilities_color.update_view_mode()
+
+
+bpy.utils.register_class(op)

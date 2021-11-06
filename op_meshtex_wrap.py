@@ -1,10 +1,6 @@
 import bpy
 import bmesh
-import operator
-from mathutils import Vector
-from collections import defaultdict
-from math import pi
-import math
+
 from . import utilities_meshtex
 
 
@@ -17,18 +13,18 @@ class op(bpy.types.Operator):
 
 	@classmethod
 	def poll(cls, context):
-		if not bpy.context.active_object or bpy.context.active_object.mode != 'OBJECT':
+		if bpy.context.scene.texToolsSettings.meshtexture_wrap < 1:
 			return False
-			
-		# Wrap texture mesh around UV mesh
-		if len(bpy.context.selected_objects) >= 1:
-			# Find a UV mesh
+		if (not bpy.context.active_object) or bpy.context.active_object.mode != 'OBJECT':
+			return False
+		if len(bpy.context.selected_objects) > 0:
+			# Find 1 UV mesh
 			if utilities_meshtex.find_uv_mesh(bpy.context.selected_objects):
 				# Find 1 or more meshes to wrap
 				if len( utilities_meshtex.find_texture_meshes(bpy.context.selected_objects)) > 0:
 					return True
-
 		return False
+
 
 	def execute(self, context):
 		wrap_meshtex(self)
@@ -37,9 +33,6 @@ class op(bpy.types.Operator):
 
 
 def wrap_meshtex(self):
-	# Wrap the mesh texture around the 
-	print("Wrap Mesh Texture :)")
-
 	# Collect UV mesh
 	obj_uv = utilities_meshtex.find_uv_mesh(bpy.context.selected_objects)
 	if not obj_uv:
@@ -53,17 +46,8 @@ def wrap_meshtex(self):
 		self.report({'ERROR_INVALID_INPUT'}, "No meshes found for mesh textures" )
 		return
 
-	print("Wrap {} texture meshes".format(len(obj_textures)))
-
-	# Undo wrapping
-	if bpy.context.scene.texToolsSettings.meshtexture_wrap > 0:
-		bpy.context.scene.texToolsSettings.meshtexture_wrap = 0
-		# Clear modifiers
-		utilities_meshtex.uv_mesh_clear(obj_uv)
-		return
-	
-	# Setup Thickness
-	utilities_meshtex.uv_mesh_fit(obj_uv, obj_textures)
+	# Setup Thickness? This doesn't seem to be really needed
+	#utilities_meshtex.uv_mesh_fit(obj_uv, obj_textures)
 
 	for obj in obj_textures:
 		# Delete previous modifiers
@@ -81,6 +65,7 @@ def wrap_meshtex(self):
 		bpy.ops.object.surfacedeform_bind(modifier="SurfaceDeform")
 
 	# Apply wrapped morph state
-	bpy.context.scene.texToolsSettings.meshtexture_wrap = 1
+	bpy.context.scene.texToolsSettings.meshtexture_wrap = 0
+
 
 bpy.utils.register_class(op)

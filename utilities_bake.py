@@ -1,24 +1,22 @@
 import bpy
 import bmesh
-import operator
-import time
 from mathutils import Vector
-from collections import defaultdict
 from math import pi
-from mathutils import Color
 
-from . import settings
 from . import utilities_color
-# from . import op_bake
+from . import settings
 
 
-keywords_low = ['lowpoly','low','lowp','lp','lo','l']
-keywords_high = ['highpoly','high','highp','hp','hi','h']
-keywords_cage = ['cage','c']
-keywords_float = ['floater','float','f']
+keywords_low = ['lowpoly','low','lowp','lp','lo']		#excluded 'l' since TexTools v1.4
+keywords_high = ['highpoly','high','highp','hp','hi']	#excluded 'h' since TexTools v1.4
+keywords_cage = ['cage']								#excluded 'c' since TexTools v1.4
+keywords_float = ['floater','float']					#excluded 'f' since TexTools v1.4
 
 split_chars = [' ','_','.','-']
 
+allMaterials = []
+allMaterialsNames = []
+elementsCount = 0
 
 
 class BakeMode:
@@ -31,9 +29,10 @@ class BakeMode:
 	composite = None				#use composite scene to process end result
 	use_project = False				#Bake projected?
 	invert = False
+	relink = {'needed':False}
 	params = []						#UI Parameters from scene settings
 
-	def __init__(self, material="", type='EMIT', normal_space='TANGENT', setVColor=None, color= (0.23, 0.23, 0.23, 1), engine='CYCLES', params = [], composite=None, use_project=False, invert=False):
+	def __init__(self, material="", type='EMIT', normal_space='TANGENT', setVColor=None, color= (0.23, 0.23, 0.23, 1), engine='CYCLES', params = [], composite=None, use_project=False, invert=False, relink = {'needed':False}):
 		self.material = material
 		self.type = type
 		self.normal_space = normal_space
@@ -44,6 +43,7 @@ class BakeMode:
 		self.composite = composite
 		self.use_project = use_project
 		self.invert = invert
+		self.relink = relink
 
 
 
@@ -65,25 +65,28 @@ def on_select_bake_mode(mode):
 def store_bake_settings():
 	# Render Settings
 	settings.bake_render_engine = bpy.context.scene.render.engine
+	settings.bake_cycles_device = bpy.context.scene.cycles.device
 	settings.bake_cycles_samples = bpy.context.scene.cycles.samples
+	if settings.bversion >= 2.92:
+		settings.bake_target_mode = bpy.context.scene.render.bake.target
+	if settings.bversion < 3:
+		settings.use_progressive_refine = bpy.context.scene.cycles.use_progressive_refine
 
 	# Disable Objects that are meant to be hidden
 	sets = settings.sets
 	objects_sets = []
-	for set in sets:
-		for obj in set.objects_low:
+	for bset in sets:
+		for obj in bset.objects_low:
 			if obj not in objects_sets:
 				objects_sets.append(obj)
-		for obj in set.objects_high:
+		for obj in bset.objects_high:
 			if obj not in objects_sets:
 				objects_sets.append(obj)
-		for obj in set.objects_cage:
+		for obj in bset.objects_cage:
 			if obj not in objects_sets:
 				objects_sets.append(obj)
 
 	settings.bake_objects_hide_render = []
-
-
 
 	# for obj in bpy.context.view_layer.objects:
 	# 	if obj.hide_render == False and obj not in objects_sets:
@@ -104,7 +107,13 @@ def restore_bake_settings():
 	if settings.bake_render_engine != '':
 		bpy.context.scene.render.engine = settings.bake_render_engine
 
+	bpy.context.scene.cycles.device = settings.bake_cycles_device
 	bpy.context.scene.cycles.samples = settings.bake_cycles_samples
+
+	if settings.bversion >= 2.92:
+		bpy.context.scene.render.bake.target = settings.bake_target_mode
+	if settings.bversion < 3:
+		bpy.context.scene.cycles.use_progressive_refine = settings.use_progressive_refine
 
 	# Restore Objects that were hidden for baking
 	for obj in settings.bake_objects_hide_render:
@@ -114,80 +123,11 @@ def restore_bake_settings():
 
 
 
-stored_materials = {}
-stored_material_faces = {}
-def store_materials_clear():
-	stored_materials.clear()
-	stored_material_faces.clear()
-
-
-
-def store_materials(obj):
-	stored_materials[obj] = []
-	stored_material_faces[obj] = []
-
-	# Enter edit mode
-	bpy.ops.object.select_all(action='DESELECT')
-	obj.select_set( state = True, view_layer = None)
-	bpy.context.view_layer.objects.active = obj
-
-	bpy.ops.object.mode_set(mode='EDIT')
-	bm = bmesh.from_edit_mesh(obj.data);
-
-	# for each slot backup the material 
-	for s in range(len(obj.material_slots)):
-		slot = obj.material_slots[s]
-
-		stored_materials[obj].append(slot.material)
-		stored_material_faces[obj].append( [face.index for face in bm.faces if face.material_index == s] )
-		
-		# print("Faces: {}x".format( len(stored_material_faces[obj][-1])  ))
-
-		if slot and slot.material:
-			slot.material.name = "backup_"+slot.material.name
-			print("- Store {} = {}".format(obj.name,slot.material.name))
-
-	# Back to object mode
-	bpy.ops.object.mode_set(mode='OBJECT')
-
-
-
-def restore_materials():
-	for obj in stored_materials:
-		# Enter edit mode
-		bpy.context.view_layer.objects.active = obj
-		bpy.ops.object.mode_set(mode='EDIT')
-		bm = bmesh.from_edit_mesh(obj.data);
-
-		# Restore slots
-		for index in range(len(stored_materials[obj])):
-			material = stored_materials[obj][index]
-			faces = stored_material_faces[obj][index]
-			
-			if material:
-				material.name = material.name.replace("backup_","")
-				obj.material_slots[index].material = material
-
-				# Face material indexies
-				for face in bm.faces:
-					if face.index in faces:
-						face.material_index = index
-
-		# Back to object mode
-		bpy.ops.object.mode_set(mode='OBJECT')
-
-		# Remove material slots if none before
-		if len(stored_materials[obj]) == 0:
-			for i in range(len(obj.material_slots)):
-				bpy.ops.object.material_slot_remove()
-
-
-
 def get_set_name_base(obj):
 
 	def remove_digits(name):
 		# Remove blender naming digits, e.g. cube.001, cube.002,...
-		if len(name)>= 4 and name[-4] == '.' and name[-3].isdigit() and name[-2].isdigit() and name[-1].isdigit():
+		if len(name) > 4 and name[-4] == '.' and name[-3:].isdigit():
 			return name[:-4]
 		return name
 
@@ -281,15 +221,15 @@ def get_object_type(obj):
 				return 'low'
 
 
-	# if nothing was detected, assume its low
+	# if nothing was detected, assume it is low
 	return 'low'
 
 
 
 def get_baked_images(sets):
 	images = []
-	for set in sets:
-		name_texture = "{}_".format(set.name)
+	for bset in sets:
+		name_texture = "{}_".format(bset.name)
 		for image in bpy.data.images:
 			if name_texture in image.name:
 				images.append(image)
@@ -300,16 +240,21 @@ def get_baked_images(sets):
 
 def get_bake_sets():
 	filtered = {}
-	for obj in bpy.context.selected_objects:
-		if obj.type == 'MESH':
-			filtered[obj] = get_object_type(obj)
+	if len(bpy.context.selected_objects) == 0:
+		if bpy.context.active_object is not None:
+			if bpy.context.active_object.mode == 'EDIT' and bpy.context.active_object.type == 'MESH':
+				filtered[bpy.context.active_object] = get_object_type(bpy.context.active_object)
+	else:
+		for obj in bpy.context.selected_objects:
+			if obj.type == 'MESH':
+				filtered[obj] = get_object_type(obj)
 	
 	groups = []
 	# Group by names
 	for obj in filtered:
 		name = get_set_name(obj)
 
-		if len(groups)==0:
+		if not groups:
 			groups.append([obj])
 		else:
 			isFound = False
@@ -334,7 +279,6 @@ def get_bake_sets():
 				break
 				
 	groups = sorted_groups			
-	# print("Keys: "+", ".join(keys))
 
 
 	bake_sets = []
@@ -382,7 +326,7 @@ class BakeSet:
 			self.has_issues = True
 
 		# Check Cage Object count to low poly count
-		if len(objects_cage) > 0 and (len(objects_low) != len(objects_cage)):
+		if len(objects_cage) > 0 and len(objects_low) != len(objects_cage):
 			self.has_issues = True
 
 		# Check for UV maps
@@ -393,14 +337,24 @@ class BakeSet:
 
 
 
-def setup_vertex_color_selection(obj):
-	bpy.ops.object.mode_set(mode='OBJECT')
+def assign_vertex_color(obj):
+	if len(obj.data.vertex_colors) > 0 :
+		vclsNames = [vcl.name for vcl in obj.data.vertex_colors]
+		if 'TexTools_temp' in vclsNames:
+			obj.data.vertex_colors['TexTools_temp'].active = True
+		else:
+			obj.data.vertex_colors.new(name='TexTools_temp')
+			obj.data.vertex_colors['TexTools_temp'].active = True
+	else:
+		obj.data.vertex_colors.new(name='TexTools_temp')
 
+
+
+def setup_vertex_color_selection(obj):
 	bpy.ops.object.select_all(action='DESELECT')
 	obj.select_set( state = True, view_layer = None)
 	bpy.context.view_layer.objects.active = obj
 	
-
 	bpy.ops.object.mode_set(mode='VERTEX_PAINT')
 
 	bpy.context.tool_settings.vertex_paint.brush.color = (0, 0, 0)
@@ -419,9 +373,6 @@ def setup_vertex_color_selection(obj):
 
 
 def setup_vertex_color_dirty(obj):
-
-	print("setup_vertex_color_dirty {}".format(obj.name))
-
 	bpy.ops.object.select_all(action='DESELECT')
 	obj.select_set( state = True, view_layer = None)
 	bpy.context.view_layer.objects.active = obj
@@ -429,7 +380,7 @@ def setup_vertex_color_dirty(obj):
 
 	# Fill white then, 
 	bm = bmesh.from_edit_mesh(obj.data)
-	colorLayer = bm.loops.layers.color.verify()
+	colorLayer = bm.loops.layers.color.active
 
 
 	color = utilities_color.safe_color( (1, 1, 1) )
@@ -446,22 +397,19 @@ def setup_vertex_color_dirty(obj):
 
 
 
-def setup_vertex_color_id_material(obj):
+def setup_vertex_color_id_material(obj, previous_materials):
 	bpy.ops.object.select_all(action='DESELECT')
 	obj.select_set( state = True, view_layer = None)
 	bpy.context.view_layer.objects.active = obj
-
-
 	bpy.ops.object.mode_set(mode='EDIT')
+	
 	bpy.ops.mesh.select_mode(use_extend=False, use_expand=False, type='FACE')
 
-	bm = bmesh.from_edit_mesh(obj.data)
-	# colorLayer = bm.loops.layers.color.verify()
+	# bm = bmesh.from_edit_mesh(obj.data)
+	# colorLayer = bm.loops.layers.color.active
 
-	for i in range(len(obj.material_slots)):
-		slot = obj.material_slots[i]
-		if slot.material:
-
+	for i, mtlname in enumerate(previous_materials[obj]):
+		if mtlname is not None:
 			# Select related faces
 			bpy.ops.object.mode_set(mode='EDIT')
 			bpy.ops.mesh.select_all(action='DESELECT')
@@ -470,8 +418,8 @@ def setup_vertex_color_id_material(obj):
 			for face in bm.faces:
 				if face.material_index == i:
 					face.select = True
-
-			color = utilities_color.get_color_id(i, len(obj.material_slots))
+			
+			color = utilities_color.get_color_id(allMaterials.index(bpy.data.materials[mtlname]), 256, jitter=True)
 
 			bpy.ops.object.mode_set(mode='VERTEX_PAINT')
 			bpy.context.tool_settings.vertex_paint.brush.color = color
@@ -494,7 +442,7 @@ def setup_vertex_color_id_element(obj):
 	bpy.ops.mesh.select_mode(use_extend=False, use_expand=False, type='FACE')
 
 	bm = bmesh.from_edit_mesh(obj.data)
-	colorLayer = bm.loops.layers.color.verify()
+	colorLayer = bm.loops.layers.color.active
 
 	# Collect elements
 	processed = set([])
@@ -511,17 +459,22 @@ def setup_vertex_color_id_element(obj):
 				processed.add(link)
 			groups.append(linked)
 
+	global elementsCount
+
 	# Color each group
 	for i in range(0,len(groups)):
-		color = utilities_color.get_color_id(i, len(groups))
+		color = utilities_color.get_color_id(elementsCount + i, 256, jitter=True)
 		color = utilities_color.safe_color( color )
 		for face in groups[i]:
 			for loop in face.loops:
 				loop[colorLayer] = color
-	obj.data.update()
+	
+	elementsCount += len(groups)
 
+	obj.data.update()
 	# Back to object mode
 	bpy.ops.object.mode_set(mode='OBJECT')
+
 
 
 def get_image_material(image):
@@ -531,8 +484,7 @@ def get_image_material(image):
 	if image.name in bpy.data.materials:
 		# Incorrect existing material, delete first and create new for cycles
 		material = bpy.data.materials[image.name]
-		material.user_clear()
-		bpy.data.materials.remove(material)
+		bpy.data.materials.remove(material, do_unlink=True)
 		material = bpy.data.materials.new(image.name)
 	else:
 		material = bpy.data.materials.new(image.name)
@@ -554,7 +506,7 @@ def get_image_material(image):
 		material.node_tree.nodes.active = node_image
 
 		#Base Diffuse BSDF
-		node_diffuse = material.node_tree.nodes['Principled BSDF']
+		bsdf_node = material.node_tree.nodes['Principled BSDF']
 
 
 		if "_normal_" in image.name:
@@ -576,9 +528,12 @@ def get_image_material(image):
 			material.node_tree.links.new(node_image.outputs[0], node_normal_map.inputs[1])
 
 			# normal_map to diffuse_bsdf link
-			material.node_tree.links.new(node_normal_map.outputs[0], node_diffuse.inputs[19])
+			if settings.bversion < 2.91:
+				material.node_tree.links.new(node_normal_map.outputs[0], bsdf_node.inputs[19])
+			else:
+				material.node_tree.links.new(node_normal_map.outputs[0], bsdf_node.inputs[20])
 
-			node_normal_map.location = node_diffuse.location - Vector((200, 0))
+			node_normal_map.location = bsdf_node.location - Vector((200, 0))
 			node_image.location = node_normal_map.location - Vector((200, 0))
 
 		else:
@@ -586,7 +541,7 @@ def get_image_material(image):
 			# dump(node_image.color_mapping.bl_rna.property_tags)
 			
 			# image node to diffuse node link
-			material.node_tree.links.new(node_image.outputs[0], node_diffuse.inputs[0])
+			material.node_tree.links.new(node_image.outputs[0], bsdf_node.inputs[0])
 
 		return material
 

@@ -1,12 +1,9 @@
 import bpy
-import bmesh
-import operator
 import string
-from mathutils import Vector
-from collections import defaultdict
-from math import pi
 
 from . import utilities_color
+
+
 
 class op(bpy.types.Operator):
 	bl_idname = "uv.textools_color_io_import"
@@ -15,14 +12,11 @@ class op(bpy.types.Operator):
 
 	@classmethod
 	def poll(cls, context):
-		
-
-		#Only in UV editor mode
 		if bpy.context.area.type != 'IMAGE_EDITOR':
 			return False
-
 		return True
 	
+
 	def execute(self, context):
 		import_colors(self, context)
 		return {'FINISHED'}
@@ -57,10 +51,5 @@ def import_colors(self, context):
 
 	bpy.ops.ui.textools_popup('INVOKE_DEFAULT', message="{}x colors imported from clipboard".format( len(hex_strings) ))
 
+
 bpy.utils.register_class(op)
-
-
-
-
-
-
