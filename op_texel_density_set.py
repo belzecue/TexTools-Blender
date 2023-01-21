@@ -56,19 +56,23 @@ def set_texel_density(self, context, edit_mode, getmode, setmode, density, udim_
 		return
 
 	bpy.ops.object.mode_set(mode='EDIT')
+	selection_mode = bpy.context.scene.tool_settings.uv_select_mode
 
 	me = bpy.context.active_object.data
 	bm = bmesh.from_edit_mesh(me)
 	uv_layers = bm.loops.layers.uv.verify()
 
 	if edit_mode:
-		object_faces = utilities_uv.get_selected_uv_faces(bm, uv_layers)
+		if is_sync:
+			object_faces = [face for face in bm.faces if face.select]
+		else:
+			object_faces = utilities_uv.get_selected_uv_faces(bm, uv_layers)
 	else:
 		object_faces = bm.faces
 
 	# Warning: No valid input objects
-	if len(object_faces) == 0:
-		self.report({'INFO'}, "No valid meshes or UV maps" )
+	if not object_faces:
+		#self.report({'INFO'}, "No valid meshes or UV maps" )
 		return
 
 	if getmode == 'IMAGE':
@@ -77,7 +81,16 @@ def set_texel_density(self, context, edit_mode, getmode, setmode, density, udim_
 		if not image:
 			self.report({'INFO'}, "No Texture found, assign Checker map or texture first" )
 			return
-		size = min(image.size[0], image.size[1])
+		if image.source =='TILED':
+			udim_tile, column, row = utilities_uv.get_UDIM_tile_coords(obj)
+			if udim_tile != 1001:
+				size = utilities_texel.get_tile_size(self, image, udim_tile)
+				if not size:
+					return
+			else:
+				size = min(image.size[0], image.size[1])
+		else:
+			size = min(image.size[0], image.size[1])
 
 	elif getmode == 'SIZE':
 		size = min(bpy.context.scene.texToolsSettings.size[0], bpy.context.scene.texToolsSettings.size[1])
@@ -86,7 +99,12 @@ def set_texel_density(self, context, edit_mode, getmode, setmode, density, udim_
 
 
 	if getmode != 'IMAGE' or (image and getmode == 'IMAGE'):
-		bpy.context.scene.tool_settings.use_uv_select_sync = False
+		if is_sync:
+			bpy.context.scene.tool_settings.use_uv_select_sync = False
+			bpy.ops.uv.select_all(action='DESELECT')
+			for face in object_faces:
+				for loop in face.loops:
+					loop[uv_layers].select = True
 
 		# Collect groups of faces to scale together
 		if setmode == 'ISLAND':
@@ -165,6 +183,10 @@ def set_texel_density(self, context, edit_mode, getmode, setmode, density, udim_
 							loop[uv_layers].uv = loop[uv_layers].uv * scale
 
 	bmesh.update_edit_mesh(me, loop_triangles=False)
+
+	# Workaround for selection not flushing properly from loops to EDGE Selection Mode, apparently since UV edge selection support was added to the UV space
+	bpy.ops.uv.select_mode(type='VERTEX')
+	bpy.context.scene.tool_settings.uv_select_mode = selection_mode
 
 	if is_sync:
 		bpy.context.scene.tool_settings.use_uv_select_sync = True

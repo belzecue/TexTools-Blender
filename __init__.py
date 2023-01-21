@@ -2,7 +2,7 @@ bl_info = {
 	"name": "TexTools",
 	"description": "Professional UV and Texture tools for Blender.",
 	"author": "renderhjs, franMarz, Sav Martin",
-	"version": (1, 4, 4),
+	"version": (1, 5),
 	"blender": (2, 80, 0),
 	"category": "UV",
 	"location": "UV Image Editor > Tools > 'TexTools' panel"
@@ -73,6 +73,7 @@ if "bpy" in locals():
 	imp.reload(op_uv_crop)
 	imp.reload(op_uv_fill)
 	imp.reload(op_uv_resize)
+	imp.reload(op_uv_unwrap)
 	imp.reload(op_uv_size_get)
 
 	
@@ -138,6 +139,7 @@ else:
 	from . import op_uv_fill
 	from . import op_uv_resize
 	from . import op_uv_size_get
+	from . import op_uv_unwrap
 
 
 # Import general modules. Important: must be placed here and not on top
@@ -164,10 +166,14 @@ def on_bake_def_back_color_set(self, context):
 
 
 def on_bake_color_space_set(self, context):
-	if utilities_ui.set_bake_color_space_int(utilities_ui.get_bake_mode()):
+	if utilities_ui.set_bake_color_space_int(utilities_ui.get_bake_mode()) == 1:
 		bpy.context.scene.texToolsSettings.bake_color_space = 'Non-Color'
-	else:
+	elif utilities_ui.set_bake_color_space_int(utilities_ui.get_bake_mode()) == 0:
 		bpy.context.scene.texToolsSettings.bake_color_space = 'sRGB'
+	elif utilities_ui.set_bake_color_space_int(utilities_ui.get_bake_mode()) == 3:
+		bpy.context.scene.texToolsSettings.bake_color_space = 'Utility - Linear - sRGB'
+	else:
+		bpy.context.scene.texToolsSettings.bake_color_space = 'Utility - sRGB - Texture'
 
 
 class Panel_Preferences(AddonPreferences):
@@ -223,7 +229,9 @@ class Panel_Preferences(AddonPreferences):
 	bake_color_space_def : EnumProperty(items= 
 		[	
 			('STANDARD', 'Standard', 'Set sRGB as Color Space for all baked textures except for Normal maps'), 
-			('PBR', 'PBR typical', 'Set Linear as Color Space for all baked maps except for Diffuse/Base Color, SSS/Emission color, colored Transmission, Environment, Combined or any custom Mode')
+			('PBR', 'PBR typical', 'Set Linear as Color Space for all baked maps except for Diffuse/Base Color, SSS/Emission color, colored Transmission, Environment, Combined or any custom Mode'),
+			('ASTANDARD', 'ACES standard', 'Set ACES sRGB Texture as Color Space for all baked textures except for Normal maps'), 
+			('APBR', 'ACES PBR typical', 'Set ACES Linear sRGB as Color Space for all baked maps except for Diffuse/Base Color, SSS/Emission color, colored Transmission, Environment, Combined or any custom Mode')
 		], 
 		description="Automatically set the Color Space of the baked images. Can be changed in the Baking panel", 
 		name = "Bake Color Space", 
@@ -272,7 +280,11 @@ class Panel_Preferences(AddonPreferences):
 			col.label(text="Set sRGB as Color Space for all baked textures except for Normal maps.")
 		elif self.bake_device == 'PBR':
 			col.label(text="Set Linear as Color Space for all baked maps except for Diffuse/Base Color, SSS/Emission color, colored Transmission, Environment, Combined or any custom Mode.")
-
+		elif self.bake_device == 'ASTANDARD':
+			col.label(text="Set ACES sRGB Texture as Color Space for all baked textures except for Normal maps.")
+		elif self.bake_device == 'APBR':
+			col.label(text="Set ACES Linear sRGB as Color Space for all baked maps except for Diffuse/Base Color, SSS/Emission color, colored Transmission, Environment, Combined or any custom Mode.")
+	
 		box.separator()
 		col = box.column(align=True)
 		col.prop(self, "bool_bake_back_color", icon='IMAGE_RGB_ALPHA')
@@ -552,9 +564,9 @@ class TexToolsSettings(PropertyGroup):
 		min = 0,
 		max = 256
 	)
-	bake_samples : FloatProperty(
+	bake_samples : IntProperty(
 		name = "Samples",
-		description = "Samples in Cycles for Baking. The higher the less noise. Default: 64",
+		description = "Samples in Cycles for Baking. The higher the less noise",
 		default = 8,
 		min = 1,
 		max = 4000
@@ -633,7 +645,9 @@ class TexToolsSettings(PropertyGroup):
 	# Default Color Space have to be Linear as the first bake mode loaded in the UI before refreshing the bake mode is Tangent Normal
 	bake_color_space : EnumProperty(items= 
 		[('sRGB', 'sRGB', 'Standard RGB output color space for the baked texture'), 
-		('Non-Color', 'Linear', 'Linear or Non-Color output color space for the baked texture')], 
+		('Non-Color', 'Linear', 'Linear or Non-Color output color space for the baked texture'),
+		('Utility - sRGB - Texture', 'Utility - sRGB - Texture', 'ACES Standard RGB Texture output color space for the baked texture'), 
+		('Utility - Linear - sRGB', 'Utility - Linear - sRGB', 'ACES Linear Standard RGB output color space for the baked texture')], 
 		name = "CS", 
 		default = 'Non-Color', 
 		get = get_bake_color_space, 
@@ -988,6 +1002,13 @@ class UI_PT_Panel_Layout(Panel):
 		row = col.row(align=True)
 		row.operator(op_island_straighten_edge_loops.op.bl_idname, text="Straight", icon_value = icon_get("op_island_straighten_edge_loops"))
 		row.operator(op_rectify.op.bl_idname, text="Rectify", icon_value = icon_get("op_rectify"))
+
+		split = col.split(factor=0.75, align=True)
+		split.operator(op_uv_unwrap.op.bl_idname, text="Unwrap", icon_value = icon_get("op_uv_unwrap")).axis="xy"
+		row = split.row(align=True)
+		row.operator(op_uv_unwrap.op.bl_idname, text="U").axis="x"
+		row.operator(op_uv_unwrap.op.bl_idname, text="V").axis="y"
+		
 		row = col.row(align=True)
 		row.scale_y = 1.25
 		row.operator(op_relax.op.bl_idname, text="Relax", icon_value = icon_get("op_relax"))
@@ -1188,7 +1209,8 @@ class UI_PT_Panel_Bake(Panel):
 				col.prop(bpy.context.scene.render.bake, "use_pass_diffuse")
 				col.prop(bpy.context.scene.render.bake, "use_pass_glossy")
 				col.prop(bpy.context.scene.render.bake, "use_pass_transmission")
-				col.prop(bpy.context.scene.render.bake, "use_pass_ambient_occlusion")
+				if settings.bversion < 3:
+					col.prop(bpy.context.scene.render.bake, "use_pass_ambient_occlusion")
 				col.prop(bpy.context.scene.render.bake, "use_pass_emit")
 			else:
 				params = op_bake.modes[bake_mode].params
@@ -1519,6 +1541,7 @@ def menu_IMAGE_uvs(self, context):
 	layout.operator(op_rectify.op.bl_idname, text="Rectify", icon_value = icon_get("op_rectify"))
 	layout.operator(op_uv_crop.op.bl_idname, text="Crop", icon_value = icon_get("op_uv_crop"))
 	layout.operator(op_uv_fill.op.bl_idname, text="Fill", icon_value = icon_get("op_uv_fill"))
+	layout.operator(op_uv_unwrap.op.bl_idname, text="Unwrap", icon_value = icon_get("op_uv_unwrap"))
 	layout.operator(op_relax.op.bl_idname, text="Relax", icon_value = icon_get("op_relax"))
 
 	layout.separator()
@@ -1687,6 +1710,7 @@ def register():
 		"op_unwrap_edge_peel.bip", 
 		"op_uv_crop.bip", 
 		"op_uv_fill.bip", 
+		"op_uv_unwrap.bip",
 		"texel_density.bip"
 	]
 	for icon in icons:

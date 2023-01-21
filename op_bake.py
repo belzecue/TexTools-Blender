@@ -8,6 +8,11 @@ from . import settings
 from . import utilities_bake as ub
 
 
+
+ch_shift = 0	#Principled BSDF input Sockets shift amount by version 3.0
+if settings.bversion >= 3.0:
+	ch_shift = 2
+
 # Notes: https://docs.blender.org/manual/en/dev/render/blender_render/bake.html
 modes={
 	#'displacement':			ub.BakeMode('',						type='DISPLACEMENT', use_project=True, color=(0, 0, 0, 1), engine='CYCLES'),
@@ -28,22 +33,22 @@ modes={
 	'id_material':				ub.BakeMode('bake_vertex_color',	type='EMIT', 		setVColor=ub.setup_vertex_color_id_material),
 	'selection':				ub.BakeMode('bake_vertex_color',	type='EMIT', 		color=(0, 0, 0, 1), setVColor=ub.setup_vertex_color_selection),
 	'diffuse':					ub.BakeMode('',						type='DIFFUSE'),
-	'base_color':				ub.BakeMode('',						type='EMIT',		relink = {'needed':True, 'b':17, 'n':0}),
-	'sss_strength':				ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7, 'n':1}),
-	'sss_color':				ub.BakeMode('',						type='EMIT',		relink = {'needed':True, 'b':17, 'n':3}),
-	'metallic':					ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7, 'n':4}),
-	'specular':					ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7, 'n':5}),
-	'specular_tint':			ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7, 'n':6}),
+	'base_color':				ub.BakeMode('',						type='EMIT',								relink = {'needed':True, 'b':17+ch_shift, 'n':0}),
+	'sss_strength':				ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7+ch_shift, 'n':1}),
+	'sss_color':				ub.BakeMode('',						type='EMIT',								relink = {'needed':True, 'b':17+ch_shift, 'n':3}),
+	'metallic':					ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7+ch_shift, 'n':4+ch_shift}),
+	'specular':					ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7+ch_shift, 'n':5+ch_shift}),
+	'specular_tint':			ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7+ch_shift, 'n':6+ch_shift}),
 	'roughness':				ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1)),
 	'glossiness':				ub.BakeMode('',						type='ROUGHNESS',	color=(1, 1, 1, 1), 	invert=True),
-	'anisotropic':				ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7, 'n':8}),
-	'anisotropic_rotation':		ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7, 'n':9}),
-	'sheen':					ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7, 'n':10}),
-	'sheen_tint':				ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7, 'n':11}),
-	'clearcoat':				ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7, 'n':12}),
-	'clearcoat_roughness':		ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7, 'n':13}),
+	'anisotropic':				ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7+ch_shift, 'n':8+ch_shift}),
+	'anisotropic_rotation':		ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7+ch_shift, 'n':9+ch_shift}),
+	'sheen':					ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7+ch_shift, 'n':10+ch_shift}),
+	'sheen_tint':				ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7+ch_shift, 'n':11+ch_shift}),
+	'clearcoat':				ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7+ch_shift, 'n':12+ch_shift}),
+	'clearcoat_roughness':		ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7+ch_shift, 'n':13+ch_shift}),
 	'transmission':				ub.BakeMode('',						type='TRANSMISSION'),
-	'transmission_roughness':	ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7, 'n':16}),
+	'transmission_roughness':	ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7+ch_shift, 'n':16+ch_shift}),
 	'emission':					ub.BakeMode('',						type='EMIT',		color=(0, 0, 0, 1)),
 	'environment':				ub.BakeMode('',						type='ENVIRONMENT'),
 	'uv':						ub.BakeMode('',						type='UV'),
@@ -52,10 +57,11 @@ modes={
 }
 
 if settings.bversion >= 2.91:
-	modes['emission_strength']= ub.BakeMode('',			type='ROUGHNESS',	color=(0, 0, 0, 1), relink = {'needed':True, 'b':7, 'n':18})
-	modes['alpha']= 			ub.BakeMode('',			type='ROUGHNESS',	color=(0, 0, 0, 1), relink = {'needed':True, 'b':7, 'n':19})
+	modes['emission_strength']= ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7+ch_shift, 'n':18+ch_shift})
+	modes['alpha']= 			ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1), 	relink = {'needed':True, 'b':7+ch_shift, 'n':19+ch_shift})
 else:
-	modes['alpha']= 			ub.BakeMode('',			type='ROUGHNESS',	color=(0, 0, 0, 1), relink = {'needed':True, 'b':7, 'n':18})
+	modes['alpha']= 			ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1), 	relink = {'needed':True, 'b':7+ch_shift, 'n':18+ch_shift})
+
 
 
 
@@ -150,6 +156,7 @@ class op(bpy.types.Operator):
 		startTime = time.monotonic()
 		preferences = bpy.context.preferences.addons[__package__].preferences
 		circular_report = [False, ]
+		color_report = [False, ]
 
 		if preferences.bool_clean_transmission:
 			modes['transmission']=		ub.BakeMode('',			type='ROUGHNESS',	color=(0, 0, 0, 1),	relink = {'needed':True, 'b':7, 'n':15})
@@ -180,6 +187,9 @@ class op(bpy.types.Operator):
 		# Make it sure that an Image, and not a Vertex Colors layer, is the target of the bake
 		if settings.bversion >= 2.92:
 			bpy.context.scene.render.bake.target = 'IMAGE_TEXTURES'
+		# Disable denoising until it is properly implemented for baking
+		if settings.bversion >= 3:
+			bpy.context.scene.cycles.use_denoising = False
 
 		# Render sets
 		bake(
@@ -193,6 +203,7 @@ class op(bpy.types.Operator):
 			cage_extrusion = bpy.context.scene.texToolsSettings.bake_cage_extrusion,
 			ray_distance = bpy.context.scene.texToolsSettings.bake_ray_distance,
 			circular_report = circular_report,
+			color_report = color_report,
 			selected = selected_objects,
 			active = active_object,
 			pre_selection_mode = pre_selection_mode
@@ -200,15 +211,21 @@ class op(bpy.types.Operator):
 
 		elapsed = round(time.monotonic()-startTime, 2)
 		if circular_report[0]:
-			self.report({'WARNING'}, "Possible Circular Dependency: a previously baked image may have affected the new bake. Baking finished in " + str(elapsed) + "s.")
+			if color_report[0]:
+				self.report({'WARNING'}, "Possible Circular Dependency: a previously baked image may have affected the new bake; " + color_report[0] + "Baking finished in " + str(elapsed) + "s.")
+			else:
+				self.report({'WARNING'}, "Possible Circular Dependency: a previously baked image may have affected the new bake. Baking finished in " + str(elapsed) + "s.")
 		else:
-			self.report({'INFO'}, "Baking finished in " + str(elapsed) + "s.")
+			if color_report[0]:
+				self.report({'WARNING'}, color_report[0] + ". Baking finished in " + str(elapsed) + "s.")
+			else:
+				self.report({'INFO'}, "Baking finished in " + str(elapsed) + "s.")
 
 		return {'FINISHED'}
 
 
 
-def bake(self, mode, size, bake_single, sampling_scale, samples, cage_extrusion, ray_distance, circular_report, selected, active, pre_selection_mode):
+def bake(self, mode, size, bake_single, sampling_scale, samples, cage_extrusion, ray_distance, circular_report, color_report, selected, active, pre_selection_mode):
 	print("Bake '{}'".format(mode))
 
 	# Get the baking sets / pairs
@@ -339,9 +356,9 @@ def bake(self, mode, size, bake_single, sampling_scale, samples, cage_extrusion,
 			if is_clear:
 				bakeReadyMaterials = []
 				if material_loaded is None:
-					image, previous_image = setup_image(mode, name_texture, render_width, render_height, image, previous_image, material_load=False)
+					image, previous_image = setup_image(color_report, mode, name_texture, render_width, render_height, image, previous_image, material_load=False)
 				else:
-					image, previous_image = setup_image(mode, name_texture, render_width, render_height, image, previous_image, material_load=True)
+					image, previous_image = setup_image(color_report, mode, name_texture, render_width, render_height, image, previous_image, material_load=True)
 				# Avoid Circular Dependency method A: Create image copy to use in existing nodes that may be affected if baking directly in a "previous_image" whose source is an external file
 				if image == previous_image:
 					imagecopy = image.copy()
@@ -369,15 +386,14 @@ def bake(self, mode, size, bake_single, sampling_scale, samples, cage_extrusion,
 							modes[mode].setVColor(obj)
 				
 				elif modes[mode].relink['needed']:
-					for i in range(len(obj.material_slots)):
-						slot = obj.material_slots[i]
+					for slot in obj.material_slots:
 						if slot.material:
 							if slot.material not in relinkedMaterials:
 								relink_nodes(mode, slot.material)
 								relinkedMaterials.append(slot.material)
 							if modes[mode].type == 'EMIT' and settings.bversion >= 2.91:
 								if slot.material not in EmissionIgnoredMaterials:
-									channel_ignore(18, slot.material)
+									channel_ignore(modes['emission_strength'].relink['n'], slot.material)
 									EmissionIgnoredMaterials.append(slot.material)
 							if (bool_alpha_ignore and mode != 'ao' and mode != 'diffuse') or mode == 'alpha':
 								if slot.material not in AlphaIgnoredMaterials:
@@ -387,25 +403,23 @@ def bake(self, mode, size, bake_single, sampling_scale, samples, cage_extrusion,
 						setup_image_bake_node(obj, bakeReadyMaterials, image, previous_image, imagecopy)
 				
 				elif bool_emission_strength_ignore and settings.bversion >= 2.91 and mode == 'emission':
-					for i in range(len(obj.material_slots)):
-						slot = obj.material_slots[i]
+					for slot in obj.material_slots:
 						if slot.material:
 							if slot.material.use_nodes:
 								if 'Principled BSDF' in slot.material.node_tree.nodes:
 									if slot.material not in EmissionIgnoredMaterials:
-										channel_ignore(18, slot.material)
+										channel_ignore(modes['emission_strength'].relink['n'], slot.material)
 										EmissionIgnoredMaterials.append(slot.material)
 									if (bool_alpha_ignore and mode != 'ao' and mode != 'diffuse') or mode == 'alpha':
 										if slot.material not in AlphaIgnoredMaterials:
-											channel_ignore(19, slot.material)
+											channel_ignore(modes['alpha'].relink['n'], slot.material)
 											AlphaIgnoredMaterials.append(slot.material)
 					if setup_bake_nodes:
 						setup_image_bake_node(obj, bakeReadyMaterials, image, previous_image, imagecopy)
 				
 				else:
 					if (bool_alpha_ignore and mode != 'ao' and mode != 'diffuse') or mode == 'alpha':
-						for i in range(len(obj.material_slots)):
-							slot = obj.material_slots[i]
+						for slot in obj.material_slots:
 							if slot.material:
 								if slot.material.use_nodes:
 									if 'Principled BSDF' in slot.material.node_tree.nodes:
@@ -546,7 +560,7 @@ def bake(self, mode, size, bake_single, sampling_scale, samples, cage_extrusion,
 				if modes[mode].composite:
 					apply_composite(image, modes[mode].composite, bpy.context.scene.texToolsSettings.bake_curvature_size)
 				
-				# If Avoid Circular Dependency: method A was used, only report
+				# If Avoid Circular Dependency method A was used, only report
 				if image == previous_image and circular_report[0] == False:
 					for material in bakeReadyMaterials:
 						tree = material.node_tree
@@ -561,7 +575,7 @@ def bake(self, mode, size, bake_single, sampling_scale, samples, cage_extrusion,
 
 
 		for images in stored_images:
-			# If Avoid Circular Dependency: method B was used, change previous_image for the newly baked image in all materials
+			# If Avoid Circular Dependency method B was used, change previous_image for the newly baked image in all materials
 			if images[0] != images[1] and images[1] is not None:
 				for material in bpy.data.materials:
 					if material.use_nodes == True:
@@ -694,7 +708,7 @@ def get_last_item(key_name, collection):
 
 
 
-def setup_image(mode, name, width, height, image, previous_image, material_load=False):
+def setup_image(color_report, mode, name, width, height, image, previous_image, material_load=False):
 	preferences = bpy.context.preferences.addons[__package__].preferences
 
 	if preferences.bool_bake_back_color == 'CUSTOM':
@@ -702,9 +716,28 @@ def setup_image(mode, name, width, height, image, previous_image, material_load=
 	else:
 		bake_back_color = modes[mode].color
 
-	def set_color_space(image):
+	def set_color_space(color_report, image):
 		image.alpha_mode = 'NONE'
-		image.colorspace_settings.name = bpy.context.scene.texToolsSettings.bake_color_space
+		try:
+			image.colorspace_settings.name = bpy.context.scene.texToolsSettings.bake_color_space
+		except:
+			try:
+				if bpy.context.scene.texToolsSettings.bake_color_space == 'Utility - Linear - sRGB':
+					bpy.context.scene.texToolsSettings.bake_color_space = 'Non-Color'
+					color_report[0] = "ACES Color Space type is not available"
+				elif bpy.context.scene.texToolsSettings.bake_color_space == 'Utility - sRGB - Texture':
+					bpy.context.scene.texToolsSettings.bake_color_space = 'sRGB'
+					color_report[0] = "ACES Color Space type is not available"
+				elif bpy.context.scene.texToolsSettings.bake_color_space == 'Non-Color':
+					bpy.context.scene.texToolsSettings.bake_color_space = 'Utility - Linear - sRGB'
+					color_report[0] = "Standard RGB Color Space type is not available"
+				elif bpy.context.scene.texToolsSettings.bake_color_space == 'sRGB':
+					bpy.context.scene.texToolsSettings.bake_color_space = 'Utility - sRGB - Texture'
+					color_report[0] = "Standard RGB Color Space type is not available"
+				image.colorspace_settings.name = bpy.context.scene.texToolsSettings.bake_color_space
+			except:
+				color_report[0] = "No one of the known Color Space types is available"
+				return None
 
 	def resize(image):
 		if image.size[0] != width or image.size[1] != height or image.generated_width != width or image.generated_height != height:
@@ -722,7 +755,7 @@ def setup_image(mode, name, width, height, image, previous_image, material_load=
 		# Create a small new image
 		is_float_32 = preferences.bake_32bit_float == '32'
 		image = bpy.data.images.new(name, width=2, height=2, alpha=True, float_buffer=is_float_32)
-		set_color_space(image)
+		set_color_space(color_report, image)
 		apply_color(image)
 		image.file_format = 'TARGA'	#TODO revisit this when implementing image save
 		return image
@@ -740,7 +773,7 @@ def setup_image(mode, name, width, height, image, previous_image, material_load=
 					return image, None			# Not possible Circular Dependency
 				return image, previous_image	# Avoid Circular Dependency: use method B
 			else:
-				set_color_space(previous_image)
+				set_color_space(color_report, previous_image)
 				#image.generated_width = image.generated_height = 2
 				previous_image.scale(2, 2)
 				apply_color(previous_image)
@@ -749,7 +782,7 @@ def setup_image(mode, name, width, height, image, previous_image, material_load=
 				return previous_image, previous_image	# Avoid Circular Dependency: use method A
 		else:
 			if material_load:
-				set_color_space(previous_image)
+				set_color_space(color_report, previous_image)
 				#image.generated_width = image.generated_height = 2
 				previous_image.scale(2, 2)
 				apply_color(previous_image)

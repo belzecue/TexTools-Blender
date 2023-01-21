@@ -54,6 +54,7 @@ class op(bpy.types.Operator):
 
 
 def get_texel_density(self, context, edit_mode, getmode):
+	is_sync = bpy.context.scene.tool_settings.use_uv_select_sync
 	obj = bpy.context.active_object
 	if obj.type != 'MESH' or not obj.data.uv_layers:
 		return
@@ -63,12 +64,15 @@ def get_texel_density(self, context, edit_mode, getmode):
 	uv_layers = bm.loops.layers.uv.verify()
 
 	if edit_mode:
-		object_faces = utilities_uv.get_selected_uv_faces(bm, uv_layers)
+		if is_sync:
+			object_faces = [face for face in bm.faces if face.select]
+		else:
+			object_faces = utilities_uv.get_selected_uv_faces(bm, uv_layers)
 	else:
 		object_faces = bm.faces
 
-	if len(object_faces) == 0:
-		self.report({'INFO'}, "No UV maps or meshes selected" )
+	if not object_faces:
+		#self.report({'INFO'}, "No UV maps or meshes selected" )
 		return [0, 0]
 
 	if getmode == 'IMAGE':
@@ -77,7 +81,16 @@ def get_texel_density(self, context, edit_mode, getmode):
 		if not image:
 			self.report({'INFO'}, "No Texture found, assign Checker map or texture first" )
 			return [0, 0]
-		size = min(image.size[0], image.size[1])
+		if image.source =='TILED':
+			udim_tile, column, row = utilities_uv.get_UDIM_tile_coords(obj)
+			if udim_tile != 1001:
+				size = utilities_texel.get_tile_size(self, image, udim_tile)
+				if not size:
+					return [0, 0]
+			else:
+				size = min(image.size[0], image.size[1])
+		else:
+			size = min(image.size[0], image.size[1])
 
 	elif getmode == 'SIZE':
 		size = min(bpy.context.scene.texToolsSettings.size[0], bpy.context.scene.texToolsSettings.size[1])
