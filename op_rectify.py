@@ -13,11 +13,13 @@ precision = 3
 class op(bpy.types.Operator):
 	bl_idname = "uv.textools_rectify"
 	bl_label = "Rectify"
-	bl_description = "Align selected faces or verts to rectangular distribution."
+	bl_description = "Align selected UV faces or vertices to rectangular distribution"
 	bl_options = {'REGISTER', 'UNDO'}
-	
+
 	@classmethod
 	def poll(cls, context):
+		if bpy.context.area.ui_type != 'UV':
+			return False
 		if not bpy.context.active_object:
 			return False
 		if bpy.context.active_object.mode != 'EDIT':
@@ -47,7 +49,7 @@ def rectify(self, context, me=None, bm=None, uv_layers=None):
 	faces_loops = utilities_uv.selection_store(bm, uv_layers, return_selected_faces_loops=True)
 
 	# Find selection islands
-	islands = utilities_uv.splittedSelectionByIsland( bm, uv_layers, set(faces_loops.keys()) )
+	islands = utilities_uv.getSelectionIslands(bm, uv_layers, selected_faces=set(faces_loops.keys()))
 
 	for island in islands:
 		bpy.ops.uv.select_all(action='DESELECT')
@@ -225,7 +227,7 @@ def ShapeFace(uv_layers, targetFace, vertsDict):
 		if v is None:
 			continue
 		for area in bpy.context.screen.areas:
-			if area.type == 'IMAGE_EDITOR':
+			if area.ui_type == 'UV':
 				loc = area.spaces[0].cursor_location
 				hyp = hypot(loc.x/ratioX -v.uv.x, loc.y/ratioY -v.uv.y)
 				if (hyp < min):
@@ -478,6 +480,3 @@ def AreVertsQuasiEqual(v1, v2, allowedError = 0.00001):
 def hypotVert(v1, v2):
 	hyp = hypot(v1.x - v2.x, v1.y - v2.y)
 	return hyp
-
-
-bpy.utils.register_class(op)

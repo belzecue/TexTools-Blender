@@ -10,8 +10,8 @@ def is_available():
 	obj_textures = utilities_meshtex.find_texture_meshes(bpy.context.selected_objects)
 	for obj in obj_textures:
 		for modifier in obj.modifiers:
- 			if modifier.type == 'BOOLEAN':
- 				return True
+			if modifier.type == 'BOOLEAN':
+				return True
 	return False
 
 
@@ -58,6 +58,3 @@ def collapse(self):
 	for obj in previous_selection:
 		obj.select_set( state = True, view_layer = None)
 	bpy.context.view_layer.objects.active = previous_active
-
-
-bpy.utils.register_class(op)

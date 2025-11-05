@@ -9,12 +9,14 @@ class op(bpy.types.Operator):
 	bl_idname = "uv.textools_color_select"
 	bl_label = "Select by Color"
 	bl_description = "Select faces by this color"
-	bl_options = {'REGISTER', 'UNDO'}
+	bl_options = {'UNDO'}
 	
 	index : bpy.props.IntProperty(description="Color Index", default=0)
 
 	@classmethod
 	def poll(cls, context):
+		if bpy.context.area.ui_type != 'UV':
+			return False
 		if not bpy.context.active_object:
 			return False
 		if bpy.context.active_object not in bpy.context.selected_objects:
@@ -22,8 +24,6 @@ class op(bpy.types.Operator):
 		if len(bpy.context.selected_objects) != 1:
 			return False
 		if bpy.context.active_object.type != 'MESH':
-			return False
-		if bpy.context.area.type != 'IMAGE_EDITOR':
 			return False
 		return True
 	
@@ -61,6 +61,3 @@ def select_color(self, context, index):
 
 	#Change View mode
 	utilities_color.update_view_mode()
-
-
-bpy.utils.register_class(op)

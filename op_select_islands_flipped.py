@@ -2,66 +2,67 @@ import bpy
 import bmesh
 
 from . import utilities_uv
-import imp
-imp.reload(utilities_uv)
-
 
 
 class op(bpy.types.Operator):
 	bl_idname = "uv.textools_select_islands_flipped"
 	bl_label = "Select Flipped"
-	bl_description = "Select all flipped UVs"
+	bl_description = "Detect flipped UV faces across all polygons (even hidden) of the selected objects"
 	bl_options = {'REGISTER', 'UNDO'}
 
 	@classmethod
 	def poll(cls, context):
+		if bpy.context.area.ui_type != 'UV':
+			return False
 		if not bpy.context.active_object:
 			return False
 		if bpy.context.active_object.type != 'MESH':
 			return False
 		if bpy.context.active_object.mode != 'EDIT':
 			return False
-		if bpy.context.area.type != 'IMAGE_EDITOR':
-			return False
 		if not bpy.context.object.data.uv_layers:
-			return False
-		if bpy.context.scene.tool_settings.use_uv_select_sync:
 			return False
 		return True
 
-
 	def execute(self, context):
-		utilities_uv.multi_object_loop(select_flipped, context)
-		return {'FINISHED'}
+		return select_flipped(self)
 
-
-
-def select_flipped(context):
-	bm = bmesh.from_edit_mesh(bpy.context.active_object.data)
-	uv_layers = bm.loops.layers.uv.verify()
-
-	bpy.ops.uv.select_mode(type='FACE') #part of the workaround to flush the selected UVs from loops to faces
+def select_flipped(self):
 	bpy.ops.uv.select_all(action='DESELECT')
+	sync = bpy.context.scene.tool_settings.use_uv_select_sync
+	premode = bpy.context.scene.tool_settings.uv_select_mode
 
-	for face in bm.faces:
-		# Using 'Sum of Edges' to detect counter clockwise https://stackoverflow.com/questions/1165647/how-to-determine-if-a-list-of-polygon-points-are-in-clockwise-order
-		sum = 0
-		count = len(face.loops)
-		for i in range(count):
-			uv_A = face.loops[i][uv_layers].uv
-			uv_B = face.loops[(i+1)%count][uv_layers].uv
-			sum += (uv_B.x - uv_A.x) * (uv_B.y + uv_A.y)
-
-		if sum > 0:
-			# Flipped
-			for loop in face.loops:
-				loop[uv_layers].select = True
-
-		# Workaround to flush the selected UVs from loops to faces
-		#bm.select_flush(False) #not working in UV space
-		#bm.select_flush_mode() #not working in UV space
-		bpy.ops.uv.select_mode(type='VERTEX')
+	if not sync and premode == 'VERTEX':
 		bpy.ops.uv.select_mode(type='FACE')
 
+	selected_objs = utilities_uv.selected_unique_objects_in_mode_with_uv()
+	counter = 0
+	for obj in selected_objs:
+		bm = bmesh.from_edit_mesh(obj.data)
+		uv_layer = bm.loops.layers.uv.verify()
+		for f in bm.faces:
+			area = 0.0
+			uvs = [l[uv_layer].uv for l in f.loops]
+			for i in range(len(uvs)):
+				area += uvs[i - 1].cross(uvs[i])
+			if area < 0:
+				counter += 1
+				if sync:
+					f.select_set(True)
+				else:
+					for l in f.loops:
+						l[uv_layer].select = True
 
-bpy.utils.register_class(op)
+	if not counter:
+		self.report({'INFO'}, 'Flipped faces not found')
+		bpy.ops.uv.select_mode(type=premode)
+		return {'CANCELLED'}
+
+	# Workaround to flush the selected UVs from loops to faces
+	if not sync:
+		bpy.ops.uv.select_mode(type='VERTEX')
+		sel_mode = 'FACE' if premode == 'ISLAND' else premode
+		bpy.ops.uv.select_mode(type=sel_mode)
+
+	self.report({'WARNING'}, f'Detected {counter} flipped UV faces (THE AFFECTED MESH POLYGONS MAY BE HIDDEN OR UNSELECTED!)')
+	return {'FINISHED'}

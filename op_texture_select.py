@@ -8,10 +8,9 @@ class op(bpy.types.Operator):
 	bl_idname = "uv.textools_texture_select"
 	bl_label = "Select Texture"
 	bl_description = "Select the texture and bake mode"
-	bl_options = {'REGISTER', 'UNDO'}
 
 	name : bpy.props.StringProperty(
-		name="image name",
+		name="image name", 
 		default = ""
 	)
 
@@ -49,8 +48,5 @@ def select_texture(self, context):
 	if self.name in bpy.data.images:
 		image = bpy.data.images[self.name]
 		for area in bpy.context.screen.areas:
-			if area.type == 'IMAGE_EDITOR':
+			if area.ui_type == 'UV':
 				area.spaces[0].image = image
-
-
-bpy.utils.register_class(op)

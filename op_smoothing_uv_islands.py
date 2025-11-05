@@ -3,15 +3,16 @@ import math
 import bmesh
 
 from . import utilities_uv
+from . import settings
 
 
 
 class op(bpy.types.Operator):
 	bl_idname = "uv.textools_smoothing_uv_islands"
 	bl_label = "Sharp edges from Islands"
-	bl_description = "Apply smooth normals and sharp edges for UV Island borders."
+	bl_description = "Apply Smooth Normals and Sharp Edges to the UV Island borders of the Mesh"
 	bl_options = {'REGISTER', 'UNDO'}
-	
+
 	soft_self_border: bpy.props.BoolProperty(name="Soften own border", description="Do not sharpen uv-borders from an island to itself", default=False)
 
 	@classmethod
@@ -26,13 +27,14 @@ class op(bpy.types.Operator):
 
 
 	def execute(self, context):
+		premode = bpy.context.active_object.mode
 		utilities_uv.multi_object_loop(smooth_uv_islands, self, context)
+		bpy.ops.object.mode_set(mode=premode)
 		return {'FINISHED'}
 
 
 
 def smooth_uv_islands(self, context):
-	premode = bpy.context.active_object.mode
 	bpy.ops.object.mode_set(mode='EDIT')
 	#utilities_uv.selection_store(bm, uv_layers)
 
@@ -74,11 +76,8 @@ def smooth_uv_islands(self, context):
 					tested_edges.add(edge)
 
 	bpy.ops.mesh.customdata_custom_splitnormals_clear()
-	bpy.context.object.data.use_auto_smooth = True
-	bpy.context.object.data.auto_smooth_angle = math.pi
+	if settings.bversion < 4.1:
+		bpy.context.object.data.use_auto_smooth = True
+		bpy.context.object.data.auto_smooth_angle = math.pi
 
 	#utilities_uv.selection_restore(bm, uv_layers)
-	bpy.ops.object.mode_set(mode=premode)
-
-
-bpy.utils.register_class(op)

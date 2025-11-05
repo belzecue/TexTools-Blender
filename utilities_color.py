@@ -1,149 +1,72 @@
 import bpy
 import bmesh
 from mathutils import Color
-
+from .settings import tt_settings
 
 material_prefix = "TT_color_"
 gamma = 2.2
 
 
-
 def assign_slot(obj, index):
 	if index < len(obj.material_slots):
 		obj.material_slots[index].material = get_material(index)
-		# Verify color
-		assign_color(index)
-
+		assign_color(index)  # Verify color
 
 
 def safe_color(color):
 	if len(color) == 3:
-		if bpy.app.version > (2, 80, 0):
-			# Newer blender versions use RGBA
-			return (color[0], color[1], color[2], 1)
-		else:
-			return color
-	elif len(color) == 4:
-		if bpy.app.version > (2, 80, 0):
-			# Newer blender versions use RGBA
-			return color
-		else:
-			return (color[0], color[1], color[2])
+		return *color, 1
 	return color
-
 
 
 def assign_color(index):
 	material = get_material(index)
 	if material:
-		# material.use_nodes = False
-		
-		rgb = get_color(index)
-		rgba = (rgb[0], rgb[1], rgb[2], 1)
-
-		if (material.use_nodes and bpy.context.scene.render.engine == 'CYCLES') or (bpy.context.scene.render.engine == 'BLENDER_EEVEE' and material.use_nodes):
-			# Cycles material (Preferred for baking)
-			material.node_tree.nodes["Principled BSDF"].inputs[0].default_value = rgba
-			material.diffuse_color = rgba
-
-		elif bpy.context.scene.render.engine == 'BLENDER_EEVEE' and not material.use_nodes:
-			# Legacy render engine, not suited for baking
-			material.diffuse_color = rgba
-
+		rgba = (*get_color(index), 1)
+		for n in material.node_tree.nodes:
+			if n.bl_idname == "ShaderNodeBsdfPrincipled":
+				n.inputs[0].default_value = rgba
+		material.diffuse_color = rgba
 
 
 def get_material(index):
 	name = get_name(index)
-
 	# Material already exists?
 	if name in bpy.data.materials:
 		material = bpy.data.materials[name]
-
-		# Check for incorrect materials for current render engine
-		if not material:
-			replace_material(index)
-
-		if (not material.use_nodes) and bpy.context.scene.render.engine == 'CYCLES':
-			replace_material(index)
-
-		elif bpy.context.scene.render.engine == 'BLENDER_EEVEE' and material.use_nodes:
-			replace_material(index)
-		else:
-			return material
-
+		return material
 	material = create_material(index)
 	assign_color(index)
 	return material
 
 
-
-# Replace an existing material with a new one
-# This is sometimes necessary after switching the render engine
-def replace_material(index):
-	name = get_name(index)
-
-	print("Replace material and create new")
-
-	# Check if material exists
-	if name in bpy.data.materials:
-		material = bpy.data.materials[name]
-
-		# Collect material slots we have to re-assign
-		slots = []
-		for obj in bpy.context.view_layer.objects: 
-			for slot in obj.material_slots:
-				if slot.material == material:
-					slots.append(slot)
-
-		# Get new material
-		bpy.data.materials.remove(material, do_unlink=True)
-		
-		# Re-assign new material to all previous slots
-		material = create_material(index)
-		for slot in slots:
-			slot.material = material
-
-
-
 def create_material(index):
 	name = get_name(index)
-
-	# Create new image instead
 	material = bpy.data.materials.new(name)
 	material.preview_render_type = 'FLAT'
-
-	if bpy.context.scene.render.engine == 'CYCLES':
-		# Cycles: prefer nodes as it simplifies baking
-		material.use_nodes = True 
-
+	material.use_nodes = True 
 	return material
 
 
-
 def get_name(index):
-	return (material_prefix+"{:02d}").format(index)
-
+	return f"{material_prefix}{index:02d}"
 
 
 def get_color(index):
-	if index < bpy.context.scene.texToolsSettings.color_ID_count:
-		return getattr(bpy.context.scene.texToolsSettings, "color_ID_color_{}".format(index))
-
-	# Default return (Black)
-	return (0, 0, 0)
-
+	if index < tt_settings().color_ID_count:
+		return getattr(tt_settings(), f"color_ID_color_{index}")
+	return 0, 0, 0  # Default return (Black)
 
 
 def set_color(index, color):
-	if index < bpy.context.scene.texToolsSettings.color_ID_count:
-		setattr(bpy.context.scene.texToolsSettings, "color_ID_color_{}".format(index), color)
-
+	if index < tt_settings().color_ID_count:
+		setattr(tt_settings(), f"color_ID_color_{index}", color)
 
 
 def validate_face_colors(obj):
 	# Validate face colors and material slots
 	previous_mode = bpy.context.object.mode
-	count = bpy.context.scene.texToolsSettings.color_ID_count
+	count = tt_settings().color_ID_count
 
 	# Verify enough material slots
 	if len(obj.material_slots) < count:
@@ -159,7 +82,7 @@ def validate_face_colors(obj):
 	bpy.ops.object.mode_set(mode='EDIT')
 	bm = bmesh.from_edit_mesh(obj.data)
 	for face in bm.faces:
-		face.material_index%= count
+		face.material_index %= count
 	obj.data.update()
 
 	# Remove material slots that are not used
@@ -173,7 +96,6 @@ def validate_face_colors(obj):
 
 	# Restore previous mode
 	bpy.ops.object.mode_set(mode=previous_mode)
-
 
 
 def hex_to_color(hex):
@@ -190,17 +112,16 @@ def hex_to_color(hex):
 	return tuple(fin)
 
 
-
 def color_to_hex(color):
 	rgb = []
 	for i in range(3):
-		rgb.append( pow(color[i] , 1.0/gamma) )
+		rgb.append(pow(color[i], 1.0/gamma))
 
 	r = int(rgb[0]*255)
 	g = int(rgb[1]*255)
 	b = int(rgb[2]*255)
 
-	return "#{:02X}{:02X}{:02X}".format(r,g,b)
+	return f"#{r:02X}{g:02X}{b:02X}"
 
 
 
@@ -233,17 +154,15 @@ def get_color_id(index, count, jitter=False):
 	return color
 
 
-
 def update_properties_tab():
 	for area in bpy.context.screen.areas:
 		if area.type == 'PROPERTIES':
 			for space in area.spaces:
 				if space.type == 'PROPERTIES':
-					if bpy.context.scene.texToolsSettings.color_assign_mode == 'MATERIALS':
+					if tt_settings().color_assign_mode == 'MATERIALS':
 						space.context = 'MATERIAL'
 					else:	#mode == VERTEXCOLORS
 						space.context = 'DATA'
-
 
 
 def update_view_mode():
@@ -253,10 +172,10 @@ def update_view_mode():
 				if space.type == 'VIEW_3D':
 					if space.shading.type == 'RENDERED':
 						continue
-					elif space.shading.type == 'MATERIAL' and bpy.context.scene.texToolsSettings.color_assign_mode == 'MATERIALS':
+					elif space.shading.type == 'MATERIAL' and tt_settings().color_assign_mode == 'MATERIALS':
 						continue
 					space.shading.type = 'SOLID'
-					if bpy.context.scene.texToolsSettings.color_assign_mode == 'MATERIALS':
+					if tt_settings().color_assign_mode == 'MATERIALS':
 						if space.shading.color_type != 'TEXTURE':
 							space.shading.color_type = 'MATERIAL'
 					else:	#mode == VERTEXCOLORS

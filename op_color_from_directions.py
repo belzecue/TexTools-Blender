@@ -12,9 +12,9 @@ class op(bpy.types.Operator):
 	bl_options = {'REGISTER', 'UNDO'}
 	
 	directions : bpy.props.EnumProperty(items= 
-		[('2', '2', 'Top & Bottom, Sides'),
+		[('2', '2', 'Top & Bottom, Sides'), 
 		('3', '3', 'Top & Bottom, Left & Right, Front & Back'), 
-		('4', '4', 'Top, Left & Right, Front & Back, Bottom'),
+		('4', '4', 'Top, Left & Right, Front & Back, Bottom'), 
 		('6', '6', 'All sides')], 
 		name = "Directions", 
 		default = '3'
@@ -26,6 +26,8 @@ class op(bpy.types.Operator):
 
 	@classmethod
 	def poll(cls, context):
+		if bpy.context.area.ui_type != 'UV':
+			return False
 		if not bpy.context.active_object:
 			return False
 		if bpy.context.active_object not in bpy.context.selected_objects:
@@ -33,8 +35,6 @@ class op(bpy.types.Operator):
 		if len(bpy.context.selected_objects) != 1:
 			return False
 		if bpy.context.active_object.type != 'MESH':
-			return False
-		if bpy.context.area.type != 'IMAGE_EDITOR':
 			return False
 		return True
 	
@@ -66,7 +66,6 @@ def color_elements(self, context):
 	}
 	
 	for face in bm.faces:
-		print("face {} n: {}".format(face.index, face.normal))
 		# Find dominant direction
 		abs_x = abs(face.normal.x)
 		abs_y = abs(face.normal.y)
@@ -134,6 +133,3 @@ def color_elements(self, context):
 
 	bpy.ops.object.mode_set(mode='OBJECT')
 	utilities_color.validate_face_colors(obj)
-
-
-bpy.utils.register_class(op)

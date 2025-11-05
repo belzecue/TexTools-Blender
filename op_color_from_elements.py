@@ -13,6 +13,8 @@ class op(bpy.types.Operator):
 	
 	@classmethod
 	def poll(cls, context):
+		if bpy.context.area.ui_type != 'UV':
+			return False
 		if not bpy.context.active_object:
 			return False
 		if bpy.context.active_object not in bpy.context.selected_objects:
@@ -20,8 +22,6 @@ class op(bpy.types.Operator):
 		if len(bpy.context.selected_objects) != 1:
 			return False
 		if bpy.context.active_object.type != 'MESH':
-			return False
-		if bpy.context.area.type != 'IMAGE_EDITOR':
 			return False
 		return True
 
@@ -33,15 +33,12 @@ class op(bpy.types.Operator):
 
 
 def color_elements(self, context):
-	import time
-	startTime = time.monotonic()
 	obj = bpy.context.active_object
-	
+
 	# Setup Edit & Face mode
 	if obj.mode != 'EDIT':
 		bpy.ops.object.mode_set(mode='EDIT')
 	bpy.ops.mesh.select_mode(use_extend=False, use_expand=False, type='FACE')
-	
 
 	# Collect groups
 	bm = bmesh.from_edit_mesh(bpy.context.active_object.data)
@@ -96,7 +93,3 @@ def color_elements(self, context):
 
 	bpy.ops.object.mode_set(mode='OBJECT')
 	utilities_color.validate_face_colors(obj)
-	print(round(time.monotonic()-startTime, 5))
-
-
-bpy.utils.register_class(op)

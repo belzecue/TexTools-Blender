@@ -1,68 +1,63 @@
 import bpy
 import os
-import bmesh
 import time
 
 from . import utilities_ui
+from . import utilities_uv
 from . import settings
 from . import utilities_bake as ub
 
+from .settings import tt_settings, prefs
 
-
-ch_shift = 0	#Principled BSDF input Sockets shift amount by version 3.0
-if settings.bversion >= 3.0:
-	ch_shift = 2
 
 # Notes: https://docs.blender.org/manual/en/dev/render/blender_render/bake.html
-modes={
-	#'displacement':			ub.BakeMode('',						type='DISPLACEMENT', use_project=True, color=(0, 0, 0, 1), engine='CYCLES'),
-	'normal_tangent':			ub.BakeMode('',						type='NORMAL', 		color=(0.5, 0.5, 1, 1), use_project=True),
-	'normal_object': 			ub.BakeMode('',						type='NORMAL', 		color=(0.5, 0.5, 1, 1), normal_space='OBJECT'),
-	'bevel_mask':				ub.BakeMode('bake_bevel_mask',		type='EMIT', 		color=(0, 0, 0, 1), 	params=["bake_bevel_samples","bake_bevel_size"]),
-	'normal_tangent_bevel':		ub.BakeMode('bake_bevel_normal',	type='NORMAL', 		color=(0.5, 0.5, 1, 1),	params=["bake_bevel_samples","bake_bevel_size"]),
-	'normal_object_bevel':		ub.BakeMode('bake_bevel_normal',	type='NORMAL', 		color=(0.5, 0.5, 1, 1),	normal_space='OBJECT', params=["bake_bevel_samples","bake_bevel_size"]),
-	'thickness':				ub.BakeMode('bake_thickness',		type='EMIT', 		color=(0, 0, 0, 1), 	params=["bake_samples","bake_thickness_distance","bake_thickness_contrast","bake_thickness_local"]),
-	'cavity': 					ub.BakeMode('bake_cavity',			type='EMIT', 		setVColor=ub.setup_vertex_color_dirty),
-	'paint_base': 				ub.BakeMode('bake_paint_base',		type='EMIT'),
-	'dust': 					ub.BakeMode('bake_dust',			type='EMIT', 		setVColor=ub.setup_vertex_color_dirty),
-	'ao':						ub.BakeMode('',						type='AO', 			params=["bake_samples"], engine='CYCLES'),
-	'position':					ub.BakeMode('bake_position',		type='EMIT'),
-	'curvature':				ub.BakeMode('',						type='NORMAL',		use_project=True, 		params=["bake_curvature_size"], composite="curvature"),
-	'wireframe':				ub.BakeMode('bake_wireframe',		type='EMIT', 		color=(0, 0, 0, 1), 	params=["bake_wireframe_size"]),
-	'id_element':				ub.BakeMode('bake_vertex_color',	type='EMIT', 		setVColor=ub.setup_vertex_color_id_element),
-	'id_material':				ub.BakeMode('bake_vertex_color',	type='EMIT', 		setVColor=ub.setup_vertex_color_id_material),
-	'selection':				ub.BakeMode('bake_vertex_color',	type='EMIT', 		color=(0, 0, 0, 1), setVColor=ub.setup_vertex_color_selection),
-	'diffuse':					ub.BakeMode('',						type='DIFFUSE'),
-	'base_color':				ub.BakeMode('',						type='EMIT',								relink = {'needed':True, 'b':17+ch_shift, 'n':0}),
-	'sss_strength':				ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7+ch_shift, 'n':1}),
-	'sss_color':				ub.BakeMode('',						type='EMIT',								relink = {'needed':True, 'b':17+ch_shift, 'n':3}),
-	'metallic':					ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7+ch_shift, 'n':4+ch_shift}),
-	'specular':					ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7+ch_shift, 'n':5+ch_shift}),
-	'specular_tint':			ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7+ch_shift, 'n':6+ch_shift}),
-	'roughness':				ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1)),
-	'glossiness':				ub.BakeMode('',						type='ROUGHNESS',	color=(1, 1, 1, 1), 	invert=True),
-	'anisotropic':				ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7+ch_shift, 'n':8+ch_shift}),
-	'anisotropic_rotation':		ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7+ch_shift, 'n':9+ch_shift}),
-	'sheen':					ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7+ch_shift, 'n':10+ch_shift}),
-	'sheen_tint':				ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7+ch_shift, 'n':11+ch_shift}),
-	'clearcoat':				ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7+ch_shift, 'n':12+ch_shift}),
-	'clearcoat_roughness':		ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7+ch_shift, 'n':13+ch_shift}),
-	'transmission':				ub.BakeMode('',						type='TRANSMISSION'),
-	'transmission_roughness':	ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7+ch_shift, 'n':16+ch_shift}),
-	'emission':					ub.BakeMode('',						type='EMIT',		color=(0, 0, 0, 1)),
-	'environment':				ub.BakeMode('',						type='ENVIRONMENT'),
-	'uv':						ub.BakeMode('',						type='UV'),
-	'shadow':					ub.BakeMode('',						type='SHADOW',		params=["bake_samples"]),
-	'combined':					ub.BakeMode('',						type='COMBINED',	params=["bake_samples"])
+modes = {
+	# 'displacement':              ub.BakeMode(type='DISPLACEMENT', use_project=True, engine='CYCLES'),
+	'normal_tangent_bevel':       ub.BakeMode('bake_bevel_normal', type='NORMAL', color=(0.5, 0.5, 1, 1), params=["bake_bevel_samples", "bake_bevel_size"]),
+	'normal_object_bevel':        ub.BakeMode('bake_bevel_normal', type='NORMAL', color=(0.5, 0.5, 1, 1), normal_space='OBJECT', params=["bake_bevel_samples", "bake_bevel_size"]),
+	'thickness':                  ub.BakeMode('bake_thickness',    params=["bake_samples", "bake_thickness_distance", "bake_thickness_contrast", "bake_thickness_local"]),
+	'bevel_mask':                 ub.BakeMode('bake_bevel_mask',   params=["bake_bevel_samples", "bake_bevel_size"]),
+	'wireframe':                  ub.BakeMode('bake_wireframe',    params=["bake_wireframe_size"]),
+	'selection':                  ub.BakeMode('bake_vertex_color', setVColor=ub.setup_vertex_color_selection),
+	'dust':                       ub.BakeMode('bake_dust',         setVColor=ub.setup_vertex_color_dirty),
+	'id_element':                 ub.BakeMode('bake_vertex_color', setVColor=ub.setup_vertex_color_id_element),
+	'id_material':                ub.BakeMode('bake_vertex_color', setVColor=ub.setup_vertex_color_id_material),
+	'cavity':                     ub.BakeMode('bake_cavity',       setVColor=ub.setup_vertex_color_dirty),
+	'position':                   ub.BakeMode('bake_position'),
+	'paint_base':                 ub.BakeMode('bake_paint_base'),
+	'base_color':                 ub.BakeMode(type='EMIT',         relink={'needed':True, 'b':ub.chs['ech'], 'n':0}),
+	'sss_color':                  ub.BakeMode(type='EMIT',         relink={'needed':True, 'b':ub.chs['ech'], 'n':ub.chs['scch']}),
+	'specular_tint':              ub.BakeMode(type='EMIT',         relink={'needed':True, 'b':ub.chs['ech'], 'n':ub.chs['stch']}),
+	'specular':                   ub.BakeMode(type='ROUGHNESS',    relink={'needed':True, 'b':ub.chs['rch'], 'n':ub.chs['sch']}),
+	'sss_strength':               ub.BakeMode(type='ROUGHNESS',    relink={'needed':True, 'b':ub.chs['rch'], 'n':ub.chs['ssch']}),
+	'metallic':                   ub.BakeMode(type='ROUGHNESS',    relink={'needed':True, 'b':ub.chs['rch'], 'n':ub.chs['mch']}),
+	'anisotropic':                ub.BakeMode(type='ROUGHNESS',    relink={'needed':True, 'b':ub.chs['rch'], 'n':ub.chs['ach']}),
+	'anisotropic_rotation':       ub.BakeMode(type='ROUGHNESS',    relink={'needed':True, 'b':ub.chs['rch'], 'n':ub.chs['arch']}),
+	'sheen':                      ub.BakeMode(type='ROUGHNESS',    relink={'needed':True, 'b':ub.chs['rch'], 'n':ub.chs['shch']}),
+	'sheen_tint':                 ub.BakeMode(type='EMIT',         relink={'needed':True, 'b':ub.chs['ech'], 'n':ub.chs['shtch']}),
+	'clearcoat':                  ub.BakeMode(type='ROUGHNESS',    relink={'needed':True, 'b':ub.chs['rch'], 'n':ub.chs['cch']}),
+	'clearcoat_roughness':        ub.BakeMode(type='ROUGHNESS',    relink={'needed':True, 'b':ub.chs['rch'], 'n':ub.chs['crch']}),
+	'transmission_roughness':     ub.BakeMode(type='ROUGHNESS',    relink={'needed':True, 'b':ub.chs['rch'], 'n':ub.chs['trch']}),
+	'normal_object':              ub.BakeMode(type='NORMAL',       color=(0.5, 0.5, 1, 1), normal_space='OBJECT'),
+	'normal_tangent':             ub.BakeMode(type='NORMAL',       color=(0.5, 0.5, 1, 1), use_project=True),
+	'curvature':                  ub.BakeMode(type='NORMAL',       use_project=True, params=["bake_curvature_size"], composite="curvature"),
+	'ao':                         ub.BakeMode(type='AO',           params=["bake_samples"], engine='CYCLES'),
+	'shadow':                     ub.BakeMode(type='SHADOW',       params=["bake_samples"]),
+	'combined':                   ub.BakeMode(type='COMBINED',     params=["bake_samples"]),
+	'glossiness':                 ub.BakeMode(type='ROUGHNESS',    invert=True),
+	'roughness':                  ub.BakeMode(type='ROUGHNESS'),
+	'diffuse':                    ub.BakeMode(type='DIFFUSE'),
+	'environment':                ub.BakeMode(type='ENVIRONMENT'),
+	'transmission':               ub.BakeMode(type='TRANSMISSION'),
+	'uv':                         ub.BakeMode(type='UV'),
+	'emission':                   ub.BakeMode(type='EMIT'),
 }
 
 if settings.bversion >= 2.91:
-	modes['emission_strength']= ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1),		relink = {'needed':True, 'b':7+ch_shift, 'n':18+ch_shift})
-	modes['alpha']= 			ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1), 	relink = {'needed':True, 'b':7+ch_shift, 'n':19+ch_shift})
+	modes['emission_strength'] = ub.BakeMode(type='ROUGHNESS', relink={'needed':True, 'b':ub.chs['rch'], 'n':ub.chs['esch']})
+	modes['alpha'] =             ub.BakeMode(type='ROUGHNESS', relink={'needed':True, 'b':ub.chs['rch'], 'n':ub.chs['alch']})
 else:
-	modes['alpha']= 			ub.BakeMode('',						type='ROUGHNESS',	color=(0, 0, 0, 1), 	relink = {'needed':True, 'b':7+ch_shift, 'n':18+ch_shift})
-
-
+	modes['alpha'] =             ub.BakeMode(type='ROUGHNESS', relink={'needed':True, 'b':ub.chs['rch'], 'n':ub.chs['esch']})
 
 
 class op(bpy.types.Operator):
@@ -82,36 +77,45 @@ class op(bpy.types.Operator):
 			settings.bake_error = ""
 			return False
 		
-		if bake_mode in {'ao','normal_tangent','normal_object','curvature','environment','uv','shadow'}:
+		if bake_mode in {'ao', 'normal_tangent', 'normal_object', 'curvature', 'environment', 'uv', 'shadow'}:
 			settings.bake_error = ""
 			return True
-
+		bake_settings = bpy.context.scene.render.bake
 		if bake_mode == 'combined':
-			if (not bpy.context.scene.render.bake.use_pass_direct) and (not bpy.context.scene.render.bake.use_pass_indirect) and (not bpy.context.scene.render.bake.use_pass_emit):
-				settings.bake_error = "Lighting or Emit needed"
+			if not any((bake_settings.use_pass_direct, bake_settings.use_pass_indirect, bake_settings.use_pass_emit)):
+				settings.bake_error = "Lighting or Emit pass needed"
 				return False
 			settings.bake_error = ""
 			return True
 		
 		if modes[bake_mode].setVColor or not modes[bake_mode].material:
 			def is_bakeable(obj):
-				if len(obj.data.materials) <= 0:	# There are no material slots
+				if len(obj.data.materials) <= 0:  # There are no material slots
 					settings.bake_error = "Materials needed"
 					return False
-				elif not any(obj.data.materials):	# All material slots are empty
+				elif not any(obj.data.materials):  # All material slots are empty
 					settings.bake_error = "Materials needed"
 					return False
 				else:
 					for slot in obj.material_slots:
 						if slot.material is not None:
-							if slot.material.use_nodes == False:
+							if not slot.material.use_nodes:
 								settings.bake_error = "Nodal materials needed"
 								return False
-							if 'Principled BSDF' not in slot.material.node_tree.nodes:
-								bool_alpha_ignore = bpy.context.preferences.addons[__package__].preferences.bool_alpha_ignore
-								bool_clean_transmission = bpy.context.preferences.addons[__package__].preferences.bool_clean_transmission
-								builtin_modes_material = {'diffuse','emission','roughness','glossiness','transmission'}
-								if modes[bake_mode].relink['needed'] or (bool_clean_transmission and bake_mode == 'transmission') or (bool_alpha_ignore and bake_mode not in builtin_modes_material):
+							bsdf_node = None
+							for n in slot.material.node_tree.nodes:
+								if n.bl_idname == "ShaderNodeBsdfPrincipled":
+									bsdf_node = n
+								elif n.bl_idname == "ShaderNodeGroup":
+									for ng in n.node_tree.nodes:
+										if ng.bl_idname == "ShaderNodeBsdfPrincipled":
+											bsdf_node = ng
+							if not bsdf_node:
+								bool_alpha_ignore = prefs().bool_alpha_ignore
+								bool_clean_transmission = prefs().bool_clean_transmission
+								builtin_modes_material = {'diffuse', 'emission', 'roughness', 'glossiness', 'transmission'}
+								if modes[bake_mode].relink['needed'] or (bool_clean_transmission and bake_mode == 'transmission') or \
+									(bool_alpha_ignore and bake_mode not in builtin_modes_material):
 									settings.bake_error = "BSDF nodes needed"
 									return False
 						# else:
@@ -150,18 +154,15 @@ class op(bpy.types.Operator):
 		settings.bake_error = ""
 		return True
 
-
-
 	def execute(self, context):
-		startTime = time.monotonic()
-		preferences = bpy.context.preferences.addons[__package__].preferences
+		startTime = time.perf_counter()
 		circular_report = [False, ]
 		color_report = [False, ]
 
-		if preferences.bool_clean_transmission:
-			modes['transmission']=		ub.BakeMode('',			type='ROUGHNESS',	color=(0, 0, 0, 1),	relink = {'needed':True, 'b':7, 'n':15})
+		if prefs().bool_clean_transmission:
+			modes['transmission'] = ub.BakeMode(type='ROUGHNESS', relink={'needed': True, 'b': 7, 'n': 15})
 		else:
-			modes['transmission']=		ub.BakeMode('',			type='TRANSMISSION')
+			modes['transmission'] = ub.BakeMode(type='TRANSMISSION')
 
 		bake_mode = utilities_ui.get_bake_mode()
 
@@ -170,16 +171,16 @@ class op(bpy.types.Operator):
 			return {'CANCELLED'}
 
 		# Store Selection
-		selected_objects 	= [obj for obj in bpy.context.selected_objects]
-		active_object 		= bpy.context.view_layer.objects.active
+		active_object = bpy.context.view_layer.objects.active
+		selected_objects = [obj for obj in bpy.context.selected_objects]
 		pre_selection_mode = None
 		if active_object:
 			pre_selection_mode = bpy.context.active_object.mode
 		ub.store_bake_settings()
 
-		if preferences.bake_device != 'DEFAULT':
-			bpy.context.scene.cycles.device = preferences.bake_device
-		bpy.context.scene.render.engine = modes[bake_mode].engine	#Switch render engine
+		if prefs().bake_device != 'DEFAULT':
+			bpy.context.scene.cycles.device = prefs().bake_device
+		bpy.context.scene.render.engine = modes[bake_mode].engine  # Switch render engine
 
 		# Avoid weird rendering problems when Progressive Refine is activated from Blender 2.90
 		if settings.bversion < 3:
@@ -193,40 +194,37 @@ class op(bpy.types.Operator):
 
 		# Render sets
 		bake(
-			self = self, 
-			mode = bake_mode,
-			size = bpy.context.scene.texToolsSettings.size, 
-
-			bake_single = bpy.context.scene.texToolsSettings.bake_force_single,
-			sampling_scale = int(bpy.context.scene.texToolsSettings.bake_sampling),
-			samples = bpy.context.scene.texToolsSettings.bake_samples,
-			cage_extrusion = bpy.context.scene.texToolsSettings.bake_cage_extrusion,
-			ray_distance = bpy.context.scene.texToolsSettings.bake_ray_distance,
-			circular_report = circular_report,
-			color_report = color_report,
-			selected = selected_objects,
-			active = active_object,
-			pre_selection_mode = pre_selection_mode
+			self=self,
+			mode=bake_mode,
+			size=tt_settings().size,
+			bake_force=tt_settings().bake_force,
+			sampling_scale=int(tt_settings().bake_sampling),
+			circular_report=circular_report,
+			color_report=color_report,
+			selected=selected_objects,
+			active=active_object,
+			pre_selection_mode=pre_selection_mode
 		)
 
-		elapsed = round(time.monotonic()-startTime, 2)
+		elapsed = round(time.perf_counter()-startTime, 2)
 		if circular_report[0]:
 			if color_report[0]:
-				self.report({'WARNING'}, "Possible Circular Dependency: a previously baked image may have affected the new bake; " + color_report[0] + "Baking finished in " + str(elapsed) + "s.")
+				self.report({'WARNING'}, f"Possible Circular Dependency: a previously baked image may have affected the new bake; "
+										 f"{color_report[0]} Baking finished in {elapsed}s")
 			else:
-				self.report({'WARNING'}, "Possible Circular Dependency: a previously baked image may have affected the new bake. Baking finished in " + str(elapsed) + "s.")
+				self.report({'WARNING'}, f"Possible Circular Dependency: a previously baked image may have affected the new bake. "
+										 f"Baking finished in {elapsed}s")
 		else:
 			if color_report[0]:
-				self.report({'WARNING'}, color_report[0] + ". Baking finished in " + str(elapsed) + "s.")
+				self.report({'WARNING'}, f"{color_report[0]}. Baking finished in {elapsed}s.")
 			else:
-				self.report({'INFO'}, "Baking finished in " + str(elapsed) + "s.")
+				self.report({'INFO'}, f"Baking finished in {elapsed}s.")
 
 		return {'FINISHED'}
 
 
-
-def bake(self, mode, size, bake_single, sampling_scale, samples, cage_extrusion, ray_distance, circular_report, color_report, selected, active, pre_selection_mode):
-	print("Bake '{}'".format(mode))
+def bake(self, mode, size, bake_force, sampling_scale, circular_report, color_report, selected, active, pre_selection_mode):
+	print(f"Bake '{mode}'")
 
 	# Get the baking sets / pairs
 	sets = settings.sets
@@ -234,36 +232,33 @@ def bake(self, mode, size, bake_single, sampling_scale, samples, cage_extrusion,
 	for bset in sets:
 		# Requires 1+ low poly objects
 		if len(bset.objects_low) == 0:
-			self.report({'ERROR_INVALID_INPUT'}, "No low poly object as part of the '{}' set".format(bset.name) )
+			self.report({'ERROR_INVALID_INPUT'}, f"No low poly object as part of the '{bset.name}' set")
 			return {'CANCELLED'}
 		# Check for UV maps
 		for obj in bset.objects_low:
 			if (not obj.data.uv_layers) or len(obj.data.uv_layers) == 0:
-				self.report({'ERROR_INVALID_INPUT'}, "No UV map available for '{}'".format(obj.name))
+				self.report({'ERROR_INVALID_INPUT'}, f"No UV map available for '{obj.name}'")
 				return {'CANCELLED'}
 		# Check for cage inconsistencies
 		if len(bset.objects_cage) > 0 and (len(bset.objects_low) != len(bset.objects_cage)):
-			self.report({'ERROR_INVALID_INPUT'}, "{}x cage objects do not match {}x low poly objects for '{}'".format(len(bset.objects_cage), len(bset.objects_low), obj.name))
+			self.report({'ERROR_INVALID_INPUT'}, f"{len(bset.objects_cage)}x cage objects do not match {bset.objects_low}x low poly objects for '{obj.name}'")
 			return {'CANCELLED'}
 
 	# Disable edit mode
 	if bpy.context.view_layer.objects.active != None and bpy.context.object.mode != 'OBJECT':
 		bpy.ops.object.mode_set(mode='OBJECT')
 
-	bool_emission_strength_ignore = bpy.context.preferences.addons[__package__].preferences.bool_emission_ignore
-	bool_alpha_ignore = bpy.context.preferences.addons[__package__].preferences.bool_alpha_ignore
+	bool_emission_strength_ignore = prefs().bool_emission_ignore
+	bool_alpha_ignore = prefs().bool_alpha_ignore
 	render_width = sampling_scale * size[0]
 	render_height = sampling_scale * size[1]
 
-
 	# Get custom materials
 	material_loaded = get_material(mode)
-	material_empty = None
 
 	# Setup properties of the custom material_loaded
-	if material_loaded is not None:
+	if material_loaded:
 		setup_material_loaded(mode, material_loaded)
-
 
 	# If baking Material ID, make sure the color for each material is consistent between bakes
 	if mode == 'id_material':
@@ -272,7 +267,7 @@ def bake(self, mode, size, bake_single, sampling_scale, samples, cage_extrusion,
 			for i, mtl in enumerate(ub.allMaterials):
 				try: mtl.name
 				except:	ub.allMaterials[i] = bpy.data.materials.get(ub.allMaterialsNames[i])
-		else:	# Store a persistent ordered list of all originally used materials in the scene
+		else:  # Store a persistent ordered list of all originally used materials in the scene
 			ub.allMaterials = [mtl for mtl in bpy.data.materials if (mtl is not None and mtl.users != 0)]
 			ub.allMaterialsNames = [mtl.name for mtl in ub.allMaterials]
 
@@ -283,6 +278,8 @@ def bake(self, mode, size, bake_single, sampling_scale, samples, cage_extrusion,
 	# Create dictionaries to remember original and temporary -copied- materials used in the baked objects
 	previous_materials = {}
 	copied_materials = {}
+	# Container to save existing UDIM tile names of each set
+	tiles = []
 
 	for bset in sets:
 		for obj in (bset.objects_low + bset.objects_high + bset.objects_float):
@@ -301,83 +298,89 @@ def bake(self, mode, size, bake_single, sampling_scale, samples, cage_extrusion,
 				if mtl not in copied_materials:
 					mat_copied = mtl.copy()
 					obj.data.materials[i] = mat_copied
-					copied_materials[mtl] = mat_copied
+					copied_materials[mtl.name] = mat_copied.name
 				else:
-					obj.data.materials[i] = copied_materials[mtl]
+					obj.data.materials[i] = copied_materials[mtl.name]
 
 	def use_material_loaded(obj):
 		if len(obj.data.materials) > 0:
 			for i in range(len(obj.data.materials)):
-				obj.data.materials[i] = material_loaded
+				obj.data.materials[i] = bpy.data.materials[material_loaded]
 		else:
-			obj.data.materials.append(material_loaded)
-	
+			obj.data.materials.append(bpy.data.materials[material_loaded])
+
 	for bset in settings.sets:
 		if (len(bset.objects_high) + len(bset.objects_float)) == 0:
+			tiles.append(utilities_uv.get_UDIM_tiles(bset.objects_low))
 			for obj in bset.objects_low:
-				if material_loaded is None:
-					use_copied_mtls(obj)
-				else:
+				if material_loaded:
 					use_material_loaded(obj)
-		else:
-			if material_loaded is None:
-				for obj in (bset.objects_low + bset.objects_high + bset.objects_float):
+				else:
 					use_copied_mtls(obj)
-			else:
+		else:
+			tiles.append(utilities_uv.get_UDIM_tiles(bset.objects_high + bset.objects_float))
+			if material_loaded:
 				for obj in bset.objects_low:
 					use_copied_mtls(obj)
 				for obj in (bset.objects_high+bset.objects_float):
 					use_material_loaded(obj)
-
+			else:
+				for obj in (bset.objects_low + bset.objects_high + bset.objects_float):
+					use_copied_mtls(obj)
 
 	relinkedMaterials = []
 	EmissionIgnoredMaterials = []
 	AlphaIgnoredMaterials = []
 
-	bakeReadyMaterials = []	# Store references of materials where the baking image node is ready and an Avoid Circular Dependency action has been taken
-	image = previous_image = imagecopy = None	# Store image references globally just in case they have to be used to bake all sets
-	stored_images = []	# [image, previous_image, imagecopy] list of lists
+	bakeReadyMaterials = []  # Store references of materials where the baking image node is ready and an Avoid Circular Dependency action has been taken
+	image = previous_image = imagecopy = None  # Store image references globally just in case they have to be used to bake all sets
+	stored_images = []  # [image, previous_image, imagecopy] list of lists
 
-
+	# Hide all cage objects in render
+	render_state = {}
+	for bset in sets:
+		render_state[bset.name] = {}
+		for obj_cage in bset.objects_cage:
+			render_state[bset.name][obj_cage] = obj_cage.hide_render
+			obj_cage.hide_render = True
 
 	try:
+		for s, bset in enumerate(sets):
+			name_texture = f"{bset.name}_{mode}"
+			if bake_force == "Single":
+				name_texture = f"{sets[0].name}_{mode}"  # In Single mode, bake into the same texture
+			# path = bpy.path.abspath("//{}.tga".format(name_texture))
 
-		for s,bset in enumerate(sets):
+			is_clear = (not bake_force == "Single") or (bake_force == "Single" and s == 0)
 
-			# Get image name
-			name_texture = "{}_{}".format(bset.name, mode)
-			if bake_single:
-				name_texture = "{}_{}".format(sets[0].name, mode)	# In Single mode bake into same texture
-			#path = bpy.path.abspath("//{}.tga".format(name_texture))
-
-			is_clear = (not bake_single) or (bake_single and s==0)
-
-			# Setup "image" to bake on and retrieve "previous_image": an image that exists in the blend file with the same name than "image", maybe used in materials involved in the bake
+			# Setup "image" to bake on and retrieve "previous_image": an image that exists in the blend file with the same name
+			# than "image", maybe used in materials involved in the bake
 			if is_clear:
 				bakeReadyMaterials = []
-				if material_loaded is None:
-					image, previous_image = setup_image(color_report, mode, name_texture, render_width, render_height, image, previous_image, material_load=False)
-				else:
-					image, previous_image = setup_image(color_report, mode, name_texture, render_width, render_height, image, previous_image, material_load=True)
-				# Avoid Circular Dependency method A: Create image copy to use in existing nodes that may be affected if baking directly in a "previous_image" whose source is an external file
-				if image == previous_image:
-					imagecopy = image.copy()
-				else:
-					imagecopy = None
-				stored_images.append([image, previous_image, imagecopy])
+				loaded = True
+				if not material_loaded:
+					loaded = False
 
+				image, previous_image = setup_image(color_report, mode, name_texture, render_width, render_height, tiles[s], material_load=loaded)
 
+				# Avoid Circular Dependency method A: Create image copy to use in existing nodes that may be affected
+				# if baking directly in a "previous_image" whose source is an external file
+				imagecopy = image.copy() if image == previous_image else None
+				image_name = image.name
+				previous_image_name = previous_image.name if previous_image else None
+				imagecopy_name = imagecopy.name if imagecopy else None
+
+				stored_images.append([image_name, previous_image_name, imagecopy_name, name_texture])
 
 			def assign_tune_materials(obj, setup_bake_nodes=False):
 
-				if material_loaded is not None:
+				if material_loaded:
 					# If baking ID Materials, update the persistent ordered list of all materials in the scene
 					if mode == 'id_material':
 						for mtlname in previous_materials[obj]:
-							if mtlname is not None:
-								if bpy.data.materials[mtlname] not in ub.allMaterials:
-									ub.allMaterials.append(bpy.data.materials[mtlname])
-									ub.allMaterialsNames.append(mtlname)
+							if mtlname and bpy.data.materials[mtlname] not in ub.allMaterials:
+								ub.allMaterials.append(bpy.data.materials[mtlname])
+								ub.allMaterialsNames.append(mtlname)
 					if modes[mode].setVColor:
 						ub.assign_vertex_color(obj)
 						if mode == 'id_material':
@@ -400,41 +403,55 @@ def bake(self, mode, size, bake_single, sampling_scale, samples, cage_extrusion,
 									channel_ignore(modes['alpha'].relink['n'], slot.material)
 									AlphaIgnoredMaterials.append(slot.material)
 					if setup_bake_nodes:
-						setup_image_bake_node(obj, bakeReadyMaterials, image, previous_image, imagecopy)
+						setup_image_bake_node(obj, bakeReadyMaterials, image_name, previous_image_name, imagecopy_name)
 				
 				elif bool_emission_strength_ignore and settings.bversion >= 2.91 and mode == 'emission':
 					for slot in obj.material_slots:
-						if slot.material:
-							if slot.material.use_nodes:
-								if 'Principled BSDF' in slot.material.node_tree.nodes:
-									if slot.material not in EmissionIgnoredMaterials:
-										channel_ignore(modes['emission_strength'].relink['n'], slot.material)
-										EmissionIgnoredMaterials.append(slot.material)
-									if (bool_alpha_ignore and mode != 'ao' and mode != 'diffuse') or mode == 'alpha':
-										if slot.material not in AlphaIgnoredMaterials:
-											channel_ignore(modes['alpha'].relink['n'], slot.material)
-											AlphaIgnoredMaterials.append(slot.material)
+						if slot.material and slot.material.use_nodes:
+							bsdf_node = None
+							for n in slot.material.node_tree.nodes:
+								if n.bl_idname == "ShaderNodeBsdfPrincipled":
+									bsdf_node = n
+								elif n.bl_idname == "ShaderNodeGroup":
+									for ng in n.node_tree.nodes:
+										if ng.bl_idname == "ShaderNodeBsdfPrincipled":
+											bsdf_node = ng
+							if bsdf_node:
+								if slot.material not in EmissionIgnoredMaterials:
+									channel_ignore(modes['emission_strength'].relink['n'], slot.material)
+									EmissionIgnoredMaterials.append(slot.material)
+								if (bool_alpha_ignore and mode != 'ao' and mode != 'diffuse') or mode == 'alpha':
+									if slot.material not in AlphaIgnoredMaterials:
+										channel_ignore(modes['alpha'].relink['n'], slot.material)
+										AlphaIgnoredMaterials.append(slot.material)
 					if setup_bake_nodes:
-						setup_image_bake_node(obj, bakeReadyMaterials, image, previous_image, imagecopy)
+						setup_image_bake_node(obj, bakeReadyMaterials, image_name, previous_image_name, imagecopy_name)
 				
 				else:
 					if (bool_alpha_ignore and mode != 'ao' and mode != 'diffuse') or mode == 'alpha':
 						for slot in obj.material_slots:
 							if slot.material:
 								if slot.material.use_nodes:
-									if 'Principled BSDF' in slot.material.node_tree.nodes:
+									bsdf_node = None
+									for n in slot.material.node_tree.nodes:
+										if n.bl_idname == "ShaderNodeBsdfPrincipled":
+											bsdf_node = n
+										elif n.bl_idname == "ShaderNodeGroup":
+											for ng in n.node_tree.nodes:
+												if ng.bl_idname == "ShaderNodeBsdfPrincipled":
+													bsdf_node = ng
+									if bsdf_node:
 										if slot.material not in AlphaIgnoredMaterials:
 											channel_ignore(modes['alpha'].relink['n'], slot.material)
 											AlphaIgnoredMaterials.append(slot.material)
 					if setup_bake_nodes:
-						setup_image_bake_node(obj, bakeReadyMaterials, image, previous_image, imagecopy)
-
+						setup_image_bake_node(obj, bakeReadyMaterials, image_name, previous_image_name, imagecopy_name)
 
 			# Assign Materials to Objects / tune the existing materials, and distribute temp bake image nodes
 			if (len(bset.objects_high) + len(bset.objects_float)) == 0:
 				# Low poly bake: Assign material to lowpoly or tune the existing material/s
 				for obj in bset.objects_low:
-					if mode in {'ao','normal_tangent','normal_object','curvature','environment','uv','shadow','combined'}:
+					if mode in {'ao', 'normal_tangent', 'normal_object', 'curvature', 'environment', 'uv', 'shadow', 'combined'}:
 						# Clean unused material slots?
 						# if len(obj.data.materials) > 0:
 						# 	if not any(obj.data.materials):	# All material slots are empty
@@ -442,46 +459,35 @@ def bake(self, mode, size, bake_single, sampling_scale, samples, cage_extrusion,
 						# 		for i in range(len(obj.material_slots)):
 						# 			bpy.ops.object.material_slot_remove({'object': obj})
 						if len(obj.material_slots) == 0 or (not all(obj.data.materials)):
-							if "TT_bake_node" in bpy.data.materials:
-								material_empty = bpy.data.materials["TT_bake_node"]
-							else:
-								material_empty = bpy.data.materials.new(name="TT_bake_node")
+							if "TT_bake_node" not in bpy.data.materials:
+								bpy.data.materials.new(name="TT_bake_node")
 							if len(obj.material_slots) == 0:
-								obj.data.materials.append(material_empty)
+								obj.data.materials.append(bpy.data.materials["TT_bake_node"])
 							else:
 								for slot in obj.material_slots:
 									if not slot.material:
-										slot.material = material_empty
+										slot.material = bpy.data.materials["TT_bake_node"]
 					assign_tune_materials(obj, setup_bake_nodes=True)
-				if material_loaded is not None :
-					setup_image_bake_node(bset.objects_low[0], bakeReadyMaterials, image, previous_image, imagecopy)
+				if material_loaded:
+					setup_image_bake_node(bset.objects_low[0], bakeReadyMaterials, image_name, previous_image_name, imagecopy_name)
 			else:
 				# High to low poly: Low poly requires any material to bake into image
 				for obj in bset.objects_low:
 					if len(obj.material_slots) == 0 or (not all(obj.data.materials)):
-						if "TT_bake_node" in bpy.data.materials:
-							material_empty = bpy.data.materials["TT_bake_node"]
-						else:
-							material_empty = bpy.data.materials.new(name="TT_bake_node")
+						if "TT_bake_node" not in bpy.data.materials:
+							bpy.data.materials.new(name="TT_bake_node")
 						if len(obj.material_slots) == 0:
-							obj.data.materials.append(material_empty)
+							obj.data.materials.append(bpy.data.materials["TT_bake_node"])
 						else:
 							for slot in obj.material_slots:
 								if not slot.material:
-									slot.material = material_empty
-					setup_image_bake_node(obj, bakeReadyMaterials, image, previous_image, imagecopy)
+									slot.material = bpy.data.materials["TT_bake_node"]
+					setup_image_bake_node(obj, bakeReadyMaterials, image_name, previous_image_name, imagecopy_name)
 				# Assign material to highpoly or tune the existing material/s
 				for obj in (bset.objects_high+bset.objects_float):
 					assign_tune_materials(obj)
 
-
-
-			#print("Bake '{}' = {}".format(bset.name, path))
-			print("Bake "+bset.name)
-
-			# Hide all cage objects i nrender
-			for obj_cage in bset.objects_cage:
-				obj_cage.hide_render = True
+			print("Bake", bset.name)
 
 			# Bake each low poly object in this set
 			for i in range(len(bset.objects_low)):
@@ -492,7 +498,7 @@ def bake(self, mode, size, bake_single, sampling_scale, samples, cage_extrusion,
 				obj_low.hide_render = False
 
 				bpy.ops.object.select_all(action='DESELECT')
-				obj_low.select_set( state = True, view_layer = None)
+				obj_low.select_set(True)
 				bpy.context.view_layer.objects.active = obj_low
 
 				# if modes[mode].engine == 'BLENDER_EEVEE':	#TODO would this still be needed when the set background code has been moved to the next lines?
@@ -500,106 +506,62 @@ def bake(self, mode, size, bake_single, sampling_scale, samples, cage_extrusion,
 				# 	bpy.ops.object.mode_set(mode='EDIT')
 				# 	bpy.ops.mesh.select_all(action='SELECT')
 				# 	for area in bpy.context.screen.areas:
-				# 		if area.type == 'IMAGE_EDITOR':
+				# 		if area.ui_type == 'UV':
 				# 			area.spaces[0].image = image
 				# 	# bpy.data.screens['UV Editing'].areas[1].spaces[0].image = image
 				# 	bpy.ops.object.mode_set(mode='OBJECT')
 
 				if is_clear and i == 0:
 					# Set background image (CYCLES & BLENDER_EEVEE)
-					for area in bpy.context.screen.areas:
-						if area.type == 'IMAGE_EDITOR':
-							area.spaces[0].image = image
+					# for area in bpy.context.screen.areas:
+					# 	if area.ui_type == 'UV':
+					# 		area.spaces[0].image = bpy.data.images[image_name]
 					# Invert background if final invert of the baked image is needed
 					if modes[mode].invert:
 						bpy.ops.image.invert(invert_r=True, invert_g=True, invert_b=True, invert_a=False)
 
-				for obj_high in (bset.objects_high):
-					obj_high.select_set( state = True, view_layer = None)
+				for obj_high in bset.objects_high:
+					obj_high.select_set(True)
 				
-				cycles_bake(
-					mode,
-					bpy.context.scene.texToolsSettings.padding,
-					sampling_scale,
-					samples,
-					cage_extrusion,
-					ray_distance,
-					len(bset.objects_high) > 0,
-					obj_cage
-				)
+				cycles_bake(mode, tt_settings().padding, sampling_scale, len(bset.objects_high) > 0, obj_cage)
 
 				# Bake Floaters separate bake
 				if len(bset.objects_float) > 0:
 					bpy.ops.object.select_all(action='DESELECT')
-					for obj_high in (bset.objects_float):
-						obj_high.select_set( state = True, view_layer = None)
-					obj_low.select_set( state = True, view_layer = None)
+					for obj_high in bset.objects_float:
+						obj_high.select_set(True)
+					obj_low.select_set(True)
 
-					cycles_bake(
-						mode,
-						0,
-						sampling_scale,
-						samples,
-						cage_extrusion,
-						ray_distance,
-						len(bset.objects_float) > 0,
-						obj_cage
-					)
-			
-			# Restore renderable for cage objects
-			for obj_cage in bset.objects_cage:
-				obj_cage.hide_render = False
+					cycles_bake(mode, 0, sampling_scale, len(bset.objects_float) > 0, obj_cage)
 
-			# Operations to be made only after the bake is, or the bakes are, finished
-			if (not bake_single) or (bake_single and s == len(sets)-1):
+			# Operations to be made only after the bake is -or the bakes are- finished
+			if (not bake_force == "Single") or (bake_force == "Single" and s == len(sets)-1):
 				if modes[mode].invert:
 					bpy.ops.image.invert(invert_r=True, invert_g=True, invert_b=True, invert_a=False)
 				if render_width != size[0] or render_height != size[1]:
-					image.scale(size[0],size[1])
+					bpy.data.images[image_name].scale(*size)
 
 				if modes[mode].composite:
-					apply_composite(image, modes[mode].composite, bpy.context.scene.texToolsSettings.bake_curvature_size)
-				
-				# If Avoid Circular Dependency method A was used, only report
-				if image == previous_image and circular_report[0] == False:
-					for material in bakeReadyMaterials:
-						tree = material.node_tree
-						for node in tree.nodes:
-							if node.bl_idname == 'ShaderNodeTexImage':
-								if node.image == imagecopy:
-									circular_report[0] = True
-									break
-						else:
-							continue
-						break
-
-
-		for images in stored_images:
-			# If Avoid Circular Dependency method B was used, change previous_image for the newly baked image in all materials
-			if images[0] != images[1] and images[1] is not None:
-				for material in bpy.data.materials:
-					if material.use_nodes == True:
-						tree = material.node_tree
-						for node in tree.nodes:
-							if node.bl_idname == 'ShaderNodeTexImage':
-								if node.image == images[1]:
-									if material in copied_materials:
-										circular_report[0] = True
-									node.image = images[0]
-				images[0].name = name_texture
+					apply_composite(image_name, modes[mode].composite, tt_settings().bake_curvature_size)
 
 			# TODO: if autosave: image.save()
 
 
 	finally:
+		# Restore visibility in renders for cage objects
+		for bset in sets:
+			for obj_cage in bset.objects_cage:
+				obj_cage.hide_render = render_state[bset.name][obj_cage]
 
 		# Restore materials whether or not there is a problem during the baking
 		for obj in previous_materials:
 			if len(previous_materials[obj]) == 0:
 				if len(obj.material_slots) > 0:
 					obj.active_material_index = 0
+					context_override = {'object': obj}
 					for i in range(len(obj.material_slots)):
-						bpy.ops.object.material_slot_remove({'object': obj})
+						with bpy.context.temp_override(**context_override):
+							bpy.ops.object.material_slot_remove()
 			else:
 				for i, mtlname in enumerate(previous_materials[obj]):
 					if mtlname is None:
@@ -607,41 +569,78 @@ def bake(self, mode, size, bake_single, sampling_scale, samples, cage_extrusion,
 					else:
 						obj.data.materials[i] = bpy.data.materials[mtlname]
 
-			if material_loaded is not None:
+			if material_loaded:
 				if modes[mode].setVColor:
 					vclsNames = [vcl.name for vcl in obj.data.vertex_colors]
-					if 'TexTools_temp' in vclsNames :
+					if 'TexTools_temp' in vclsNames:
 						obj.data.vertex_colors.remove(obj.data.vertex_colors['TexTools_temp'])
 
 
-		for images in stored_images:
-			if images[2] is not None:
-				bpy.data.images.remove(images[2], do_unlink=True)	# Delete imagecopy
-			elif images[1] is not None:
-				bpy.data.images.remove(images[1], do_unlink=True)	# Delete previous_image
-
 		for mtl in copied_materials.values():
-			bpy.data.materials.remove(mtl, do_unlink=True)
+			bpy.data.materials.remove(bpy.data.materials[mtl], do_unlink=True)
 
-		if material_empty is not None:
-			bpy.data.materials.remove(material_empty, do_unlink=True)
+		if "TT_bake_node" in bpy.data.materials:
+			bpy.data.materials.remove(bpy.data.materials["TT_bake_node"], do_unlink=True)
 
-		if material_loaded is not None:
-			bpy.data.materials.remove(material_loaded, do_unlink=True)
+		if material_loaded:
+			bpy.data.materials.remove(bpy.data.materials[material_loaded], do_unlink=True)
+
+		for images in stored_images:
+			if images[1] and images[1] in bpy.data.images and bpy.data.images[images[0]] != bpy.data.images[images[1]]:
+				# If Avoid Circular Dependency method B was used, change previous_image for the newly baked image in all materials
+				# bpy.data.images[images[1]].user_remap(bpy.data.images[images[0]])
+				for material in bpy.data.materials:
+					if material.use_nodes:
+						tree = material.node_tree
+						for node in tree.nodes:
+							if node.bl_idname == 'ShaderNodeTexImage':
+								if node.image == bpy.data.images[images[1]]:
+									if material in copied_materials:
+										circular_report[0] = True
+									node.image = bpy.data.images[images[0]]
+
+			# Force previous or temporary images to be removed (user related errors may be prompted in console, but the process should be stable)
+			if images[2] and images[2] in bpy.data.images:
+				# bpy.data.images[images[2]].user_clear()
+				# bpy.data.batch_remove([bpy.data.images[images[2]]])
+				bpy.data.images.remove(bpy.data.images[images[2]], do_unlink=True)  # Delete imagecopy
+			elif images[1] and images[1] in bpy.data.images:
+				# bpy.data.images[images[1]].user_clear()
+				# bpy.data.batch_remove([bpy.data.images[images[1]]])
+				bpy.data.images.remove(bpy.data.images[images[1]], do_unlink=True)  # Delete previous_image
+
+			# If Avoid Circular Dependency method A was used, clear users of the saved image and recover them for the newly baked image (they share the ID but are not the same)
+			if images[2]:
+				circular_report[0] = True
+				bpy.data.images[images[0]].user_clear()
+				for material in bpy.data.materials:
+					if material.use_nodes:
+						tree = material.node_tree
+						for node in tree.nodes:
+							if node.bl_idname == 'ShaderNodeTexImage':
+								if node.image.name == images[0]:
+									node.image = bpy.data.images[images[0]]
+
+			# Always set proper name to the newly baked image (when all previous or temporary images have been removed)
+			bpy.data.images[images[0]].name = images[3]
+
 
 		# Restore settings and selection mode
 		ub.restore_bake_settings()
 		bpy.ops.object.select_all(action='DESELECT')
 		for obj in selected:
-			obj.select_set( state = True, view_layer = None)
+			obj.select_set(True)
+		# Enter and exit Edit Mode to force set a real vertex colors layer as active
+		bpy.ops.object.mode_set(mode='EDIT')
+		bpy.ops.object.mode_set(mode='OBJECT')
 		if active:
 			bpy.context.view_layer.objects.active = active
 			bpy.ops.object.mode_set(mode=pre_selection_mode)
 
 
 
-
-def apply_composite(image, scene_name, size):
+def apply_composite(image_name, scene_name, size):
+	image = bpy.data.images[image_name]
 	previous_scene = bpy.context.window.scene
 	# avoid Sun Position addon error
 	preWorldPropertiesNodesBool = previous_scene.world.use_nodes
@@ -651,7 +650,7 @@ def apply_composite(image, scene_name, size):
 	if scene_name in bpy.data.scenes:
 		scene = bpy.data.scenes[scene_name]
 	else:
-		path = os.path.join(os.path.dirname(__file__), "resources/compositing.blend")+"\\Scene\\"
+		path = os.path.join(os.path.dirname(__file__), "resources/compositing.blend", "Scene")
 		bpy.ops.wm.append(filename=scene_name, directory=path, link=False, autoselect=False)
 		scene = bpy.data.scenes[scene_name]
 
@@ -690,7 +689,6 @@ def apply_composite(image, scene_name, size):
 		bpy.data.scenes.remove(scene)
 
 
-
 def get_last_item(key_name, collection):
 	# bpy.data.images
 	# Get last image of a series, e.g. .001, .002, 003
@@ -699,7 +697,7 @@ def get_last_item(key_name, collection):
 		if key_name in item.name:
 			keys.append(item.name)
 
-	print("Search for {}x : '{}'".format(len(keys), ",".join(keys) ) )
+	print("Search for {}x : '{}'".format(len(keys), ", ".join(keys) ) )
 
 	if len(keys) > 0:
 		return collection[keys[-1]]
@@ -707,43 +705,43 @@ def get_last_item(key_name, collection):
 	return None
 
 
-
-def setup_image(color_report, mode, name, width, height, image, previous_image, material_load=False):
-	preferences = bpy.context.preferences.addons[__package__].preferences
-
-	if preferences.bool_bake_back_color == 'CUSTOM':
-		bake_back_color = bpy.context.scene.texToolsSettings.bake_back_color
+def setup_image(color_report, mode, name, width, height, tiles, material_load=False):
+	if prefs().bool_bake_back_color == 'CUSTOM':
+		bake_back_color = tt_settings().bake_back_color
 	else:
 		bake_back_color = modes[mode].color
 
 	def set_color_space(color_report, image):
 		image.alpha_mode = 'NONE'
 		try:
-			image.colorspace_settings.name = bpy.context.scene.texToolsSettings.bake_color_space
+			image.colorspace_settings.name = tt_settings().bake_color_space
 		except:
 			try:
-				if bpy.context.scene.texToolsSettings.bake_color_space == 'Utility - Linear - sRGB':
-					bpy.context.scene.texToolsSettings.bake_color_space = 'Non-Color'
+				if tt_settings().bake_color_space == 'Utility - Linear - sRGB':
+					tt_settings().bake_color_space = 'Non-Color'
 					color_report[0] = "ACES Color Space type is not available"
-				elif bpy.context.scene.texToolsSettings.bake_color_space == 'Utility - sRGB - Texture':
-					bpy.context.scene.texToolsSettings.bake_color_space = 'sRGB'
+				elif tt_settings().bake_color_space == 'Utility - sRGB - Texture':
+					tt_settings().bake_color_space = 'sRGB'
 					color_report[0] = "ACES Color Space type is not available"
-				elif bpy.context.scene.texToolsSettings.bake_color_space == 'Non-Color':
-					bpy.context.scene.texToolsSettings.bake_color_space = 'Utility - Linear - sRGB'
+				elif tt_settings().bake_color_space == 'Non-Color':
+					tt_settings().bake_color_space = 'Utility - Linear - sRGB'
 					color_report[0] = "Standard RGB Color Space type is not available"
-				elif bpy.context.scene.texToolsSettings.bake_color_space == 'sRGB':
-					bpy.context.scene.texToolsSettings.bake_color_space = 'Utility - sRGB - Texture'
+				elif tt_settings().bake_color_space == 'sRGB':
+					tt_settings().bake_color_space = 'Utility - sRGB - Texture'
 					color_report[0] = "Standard RGB Color Space type is not available"
-				image.colorspace_settings.name = bpy.context.scene.texToolsSettings.bake_color_space
+				image.colorspace_settings.name = tt_settings().bake_color_space
 			except:
 				color_report[0] = "No one of the known Color Space types is available"
 				return None
 
 	def resize(image):
 		if image.size[0] != width or image.size[1] != height or image.generated_width != width or image.generated_height != height:
-			#image.generated_width = width
-			#image.generated_height = height
 			image.scale(width, height)
+
+	def set_image_as_background(image):
+		for area in bpy.context.screen.areas:
+			if area.ui_type == 'UV':
+				area.spaces[0].image = bpy.data.images[image.name]
 
 	def apply_color(image):
 		# Set background color to a small version of the image for performance
@@ -752,53 +750,74 @@ def setup_image(color_report, mode, name, width, height, image, previous_image, 
 		resize(image)
 
 	def image_create():
-		# Create a small new image
-		is_float_32 = preferences.bake_32bit_float == '32'
-		image = bpy.data.images.new(name, width=2, height=2, alpha=True, float_buffer=is_float_32)
+		is_float_32 = prefs().bake_32bit_float == '32'
+
+		if tiles and settings.bversion >= 3.2:
+			# Create a full size new tiled image with alpha background
+			image = bpy.data.images.new(name, width=width, height=height, alpha=True, float_buffer=is_float_32, tiled=True)
+		else:
+			# Create a small new image
+			image = bpy.data.images.new(name, width=2, height=2, alpha=True, float_buffer=is_float_32, tiled=False)
+
+		set_image_as_background(image)
 		set_color_space(color_report, image)
-		apply_color(image)
-		image.file_format = 'TARGA'	#TODO revisit this when implementing image save
+
+		if tiles and settings.bversion >= 3.2:
+			image.tiles.get(1001).generated_color = bake_back_color
+			for tile in tiles:
+				bpy.ops.image.tile_add(number=tile, width=width, height=height, float=is_float_32, color=bake_back_color)
+			image.tiles.active_index = 0
+		else:
+			apply_color(image)
+
+		# TODO revisit this if image save is implemented
+		# image.file_format = 'TARGA'
 		return image
-	
-	
+
+
 	if name in bpy.data.images:
 		previous_image = bpy.data.images[name]
 		if previous_image.source == 'FILE':
 			# Clear image if it was deleted or moved outside
-			print("Existing image expected path "+bpy.path.abspath(previous_image.filepath))
+			print("Existing image expected path", bpy.path.abspath(previous_image.filepath))
 			if not os.path.isfile(bpy.path.abspath(previous_image.filepath)):
-				print("Unlinking missing image "+name)
+				print("Unlinking missing image", name)
 				image = image_create()
 				if material_load:
-					return image, None			# Not possible Circular Dependency
-				return image, previous_image	# Avoid Circular Dependency: use method B
+					return image, None        # Not possible Circular Dependency
+				return image, previous_image  # Avoid Circular Dependency: use method B
 			else:
+				set_image_as_background(previous_image)
 				set_color_space(color_report, previous_image)
-				#image.generated_width = image.generated_height = 2
-				previous_image.scale(2, 2)
-				apply_color(previous_image)
+				if settings.bversion < 3.2 or not tiles:
+					previous_image.scale(2, 2)
+					apply_color(previous_image)
 				if material_load:
-					return previous_image, None			# Not possible Circular Dependency
-				return previous_image, previous_image	# Avoid Circular Dependency: use method A
+					return previous_image, None        # Not possible Circular Dependency
+				return previous_image, previous_image  # Avoid Circular Dependency: use method A
 		else:
 			if material_load:
+				set_image_as_background(previous_image)
 				set_color_space(color_report, previous_image)
-				#image.generated_width = image.generated_height = 2
-				previous_image.scale(2, 2)
-				apply_color(previous_image)
-				return previous_image, None		# Not possible Circular Dependency
+				if settings.bversion < 3.2 or not tiles:
+					previous_image.scale(2, 2)
+					apply_color(previous_image)
+				return previous_image, None  # Not possible Circular Dependency
 			image = image_create()
-			return image, previous_image		# Avoid Circular Dependency: use method B
+			return image, previous_image     # Avoid Circular Dependency: use method B
 	else:
 		image = image_create()
-		return image, None						# Not possible Circular Dependency
+		return image, None                   # Not possible Circular Dependency
 
 
+def setup_image_bake_node(obj, bakeReadyMaterials, image_name, previous_image_name, imagecopy_name):
+	image = bpy.data.images[image_name]
+	imagecopy = bpy.data.images[imagecopy_name] if imagecopy_name else None
+	previous_image = bpy.data.images[previous_image_name] if previous_image_name else None
 
-def setup_image_bake_node(obj, bakeReadyMaterials, image, previous_image, imagecopy):
 	if len(obj.data.materials) <= 0:
 		print("ERROR, need spare material to setup active image texture to bake!!!")
-	
+
 	else:
 		def avoid_circular(tree, image):
 			# Avoid Circular Dependency method A
@@ -806,10 +825,9 @@ def setup_image_bake_node(obj, bakeReadyMaterials, image, previous_image, imagec
 				if node.bl_idname == 'ShaderNodeTexImage':
 					if node.image == image:
 						node.image = imagecopy
-		
+
 		def assign_node(tree):
 			# Assign bake node
-			node = None
 			if "TexTools_bake" in tree.nodes:
 				node = tree.nodes["TexTools_bake"]
 			else:
@@ -821,9 +839,9 @@ def setup_image_bake_node(obj, bakeReadyMaterials, image, previous_image, imagec
 
 		for slot in obj.material_slots:
 			if slot.material:
-				if slot.material not in bakeReadyMaterials:
+				if slot.material.name not in bakeReadyMaterials:
 					if image == previous_image:
-						if slot.material.use_nodes == False:
+						if not slot.material.use_nodes:
 							# No need to Avoid Circular Dependency
 							slot.material.use_nodes = True
 							assign_node(slot.material.node_tree)
@@ -833,37 +851,45 @@ def setup_image_bake_node(obj, bakeReadyMaterials, image, previous_image, imagec
 							assign_node(slot.material.node_tree)
 					else:
 						# Avoid Circular Dependency method B is used just by not baking directly on the existing previous_image
-						if slot.material.use_nodes == False:
+						if not slot.material.use_nodes:
 							slot.material.use_nodes = True
 						assign_node(slot.material.node_tree)
 					
-					bakeReadyMaterials.append(slot.material)
-
+					bakeReadyMaterials.append(slot.material.name)
 
 
 def relink_nodes(mode, material):
-	if material.use_nodes == False:
+	if not material.use_nodes:
 		material.use_nodes = True
 	tree = material.node_tree
-	bsdf_node = tree.nodes['Principled BSDF']
+	bsdf_node = None
+	for n in tree.nodes:
+		if n.bl_idname == "ShaderNodeBsdfPrincipled":
+			bsdf_node = n
+		elif n.bl_idname == "ShaderNodeGroup":
+			for ng in n.node_tree.nodes:
+				if ng.bl_idname == "ShaderNodeBsdfPrincipled":
+					tree = n.node_tree
+					bsdf_node = ng
 
 	# set b, which is the base(original) socket index, and n, which is the new-values-source index for the base socket
 	b, n = modes[mode].relink['b'], modes[mode].relink['n']
 
 	base_node = base_socket = None
-	if len(bsdf_node.inputs[b].links) != 0 :
+	if len(bsdf_node.inputs[b].links) != 0:
 		base_node = bsdf_node.inputs[b].links[0].from_node
 		base_socket = bsdf_node.inputs[b].links[0].from_socket.name
-	base_value = (bsdf_node.inputs[b].default_value, )
-	# If the base value is a color, decompose its value so it can be stored and recovered later, otherwise its value will change while the swap of sockets is committed
-	if not isinstance(base_value[0], float):
-		base_value = ((base_value[0][0],base_value[0][1],base_value[0][2],base_value[0][3]), )
-	new_node = None
+	# base_value = (bsdf_node.inputs[b].default_value, )
+	# If the base value is a color, decompose its value, so it can be stored and recovered later,
+	# otherwise its value will change while the swap of sockets is committed
+	# if not isinstance(base_value[0], float):
+	# 	base_value = ((base_value[0][0], base_value[0][1], base_value[0][2], base_value[0][3]), )
+	# new_node = None
 
-	if len(bsdf_node.inputs[n].links) != 0 :
+	if len(bsdf_node.inputs[n].links) != 0:
 		new_node = bsdf_node.inputs[n].links[0].from_node
 		new_node_socket = bsdf_node.inputs[n].links[0].from_socket.name
-		if (new_node == base_node and new_node != None) and base_socket == new_node_socket :
+		if (new_node == base_node and new_node != None) and base_socket == new_node_socket:
 			pass
 		else:
 			bsdf_node.inputs[b].default_value = bsdf_node.inputs[n].default_value
@@ -874,68 +900,63 @@ def relink_nodes(mode, material):
 		bsdf_node.inputs[b].default_value = bsdf_node.inputs[n].default_value
 
 
-
 def channel_ignore(channel, material):
-	if material.use_nodes == False:
+	if not material.use_nodes:
 		material.use_nodes = True
 	tree = material.node_tree
-	bsdf_node = tree.nodes['Principled BSDF']
+	bsdf_node = None
+	for n in tree.nodes:
+		if n.bl_idname == "ShaderNodeBsdfPrincipled":
+			bsdf_node = n
+		elif n.bl_idname == "ShaderNodeGroup":
+			for ng in n.node_tree.nodes:
+				if ng.bl_idname == "ShaderNodeBsdfPrincipled":
+					tree = n.node_tree
+					bsdf_node = ng
 
-	if len(bsdf_node.inputs[channel].links) != 0 :
+	if len(bsdf_node.inputs[channel].links) != 0:
 		tree.links.remove(bsdf_node.inputs[channel].links[0])
 	
 	# So far, Channels whose effect on others is wanted to be ignored have to be set equal to 1.0
 	bsdf_node.inputs[channel].default_value = 1.0
 
 
-
-def setup_material_loaded(mode, material_bake):
-	if mode == 'wireframe':
-		if "Value" in material_bake.node_tree.nodes:
-			material_bake.node_tree.nodes["Value"].outputs[0].default_value = bpy.context.scene.texToolsSettings.bake_wireframe_size
-	if mode == 'bevel_mask':
-		if "Bevel" in material_bake.node_tree.nodes:
-			material_bake.node_tree.nodes["Bevel"].inputs[0].default_value = bpy.context.scene.texToolsSettings.bake_bevel_size
-			material_bake.node_tree.nodes["Bevel"].samples = bpy.context.scene.texToolsSettings.bake_bevel_samples
-	if mode == 'normal_tangent_bevel':
-		if "Bevel" in material_bake.node_tree.nodes:
-			material_bake.node_tree.nodes["Bevel"].inputs[0].default_value = bpy.context.scene.texToolsSettings.bake_bevel_size
-			material_bake.node_tree.nodes["Bevel"].samples = bpy.context.scene.texToolsSettings.bake_bevel_samples
-	if mode == 'normal_object_bevel':
-		if "Bevel" in material_bake.node_tree.nodes:
-			material_bake.node_tree.nodes["Bevel"].inputs[0].default_value = bpy.context.scene.texToolsSettings.bake_bevel_size
-			material_bake.node_tree.nodes["Bevel"].samples = bpy.context.scene.texToolsSettings.bake_bevel_samples
-	if mode == 'thickness':
-		if "ao" in material_bake.node_tree.nodes:
-			material_bake.node_tree.nodes["ao"].samples = bpy.context.scene.texToolsSettings.bake_samples
-			material_bake.node_tree.nodes["ao"].only_local = bpy.context.scene.texToolsSettings.bake_thickness_local
-		if "Distance" in material_bake.node_tree.nodes:
-			material_bake.node_tree.nodes["Distance"].outputs[0].default_value = bpy.context.scene.texToolsSettings.bake_thickness_distance
-		if "Contrast" in material_bake.node_tree.nodes:
-			material_bake.node_tree.nodes["Contrast"].outputs[0].default_value = bpy.context.scene.texToolsSettings.bake_thickness_contrast
-
+def setup_material_loaded(mode, name):
+	nodes = bpy.data.materials[name].node_tree.nodes
+	if mode in ('normal_tangent_bevel', 'normal_object_bevel', 'bevel_mask') and 'Bevel' in nodes:
+		nodes["Bevel"].inputs[0].default_value = tt_settings().bake_bevel_size
+		nodes["Bevel"].samples = tt_settings().bake_bevel_samples
+	elif mode == 'wireframe' and 'Value' in nodes:
+		nodes["Value"].outputs[0].default_value = tt_settings().bake_wireframe_size
+	elif mode == 'thickness':
+		if 'ao' in nodes:
+			nodes["ao"].samples = tt_settings().bake_samples
+			nodes["ao"].only_local = tt_settings().bake_thickness_local
+		if "Distance" in nodes:
+			nodes["Distance"].outputs[0].default_value = tt_settings().bake_thickness_distance
+		if "Contrast" in nodes:
+			nodes["Contrast"].outputs[0].default_value = tt_settings().bake_thickness_contrast
 
 
 def get_material(mode):
 	if modes[mode].material == "":
-		return None	# No material setup required
+		return None  # No material setup required
 
 	# Find or load material
 	name = modes[mode].material
-	path = os.path.join(os.path.dirname(__file__), "resources/materials.blend")+"\\Material\\"
+	path = os.path.join(os.path.dirname(__file__), "resources/materials.blend", "Material")
 	if "bevel" in mode or "thickness" in mode:
-		path = os.path.join(os.path.dirname(__file__), "resources/materials_2.80.blend")+"\\Material\\"
-	#print("Get material {}\n{}".format(mode, path))
+		path = os.path.join(os.path.dirname(__file__), "resources/materials_2.80.blend", "Material")
+	# print("Get material {}\n{}".format(mode, path))
 
 	if bpy.data.materials.get(name) is None:
-		#print("Material not yet loaded: "+mode)
+		# print("Material not yet loaded: "+mode)
 		bpy.ops.wm.append(filename=name, directory=path, link=False, autoselect=False)
 
-	return bpy.data.materials.get(name)
+	return name
 
 
-
-def cycles_bake(mode, padding, sampling_scale, samples, cage_extrusion, ray_distance, is_multi, obj_cage):
+def cycles_bake(mode, padding, sampling_scale, is_multi, obj_cage):
 	
 	# if modes[mode].engine == 'BLENDER_EEVEE': 
 	# 	# Snippet: https://gist.github.com/AndrewRayCode/760c4634a77551827de41ed67585064b
@@ -956,80 +977,50 @@ def cycles_bake(mode, padding, sampling_scale, samples, cage_extrusion, ray_dist
 
 	# 	bpy.ops.object.bake_image()
 
-	if modes[mode].engine == 'CYCLES' or modes[mode].engine == 'BLENDER_EEVEE' :
+	bake_settings = bpy.context.scene.render.bake
+	if modes[mode].engine == 'CYCLES' or modes[mode].engine == 'BLENDER_EEVEE':
 
 		if modes[mode].normal_space == 'OBJECT':
-			#See: https://twitter.com/Linko_3D/status/963066705584054272
-			bpy.context.scene.render.bake.normal_r = 'POS_X'
-			bpy.context.scene.render.bake.normal_g = 'POS_Z'
-			bpy.context.scene.render.bake.normal_b = 'NEG_Y'
+			# See: https://twitter.com/Linko_3D/status/963066705584054272
+			bake_settings.normal_r = 'POS_X'
+			bake_settings.normal_g = 'POS_Z'
+			bake_settings.normal_b = 'NEG_Y'
 
 		elif modes[mode].normal_space == 'TANGENT':
-			bpy.context.scene.render.bake.normal_r = 'POS_X'
-			bpy.context.scene.render.bake.normal_b = 'POS_Z'
+			bake_settings.normal_r = 'POS_X'
+			bake_settings.normal_b = 'POS_Z'
 			# Adjust Y swizzle from Addon preferences
-			swizzle_y = bpy.context.preferences.addons[__package__].preferences.swizzle_y_coordinate
-			if swizzle_y == 'Y-':
-				bpy.context.scene.render.bake.normal_g = 'NEG_Y'
-			elif swizzle_y == 'Y+':
-				bpy.context.scene.render.bake.normal_g = 'POS_Y'
+			bake_settings.normal_g = 'NEG_Y' if (prefs().swizzle_y_coordinate == 'Y-') else 'POS_Y'
 
 		# Set samples
-		bpy.context.scene.cycles.samples = samples
+		bpy.context.scene.cycles.samples = tt_settings().bake_samples
 
 		# Speed up samples for simple render modes
 		if modes[mode].type in {'EMIT', 'DIFFUSE', 'ROUGHNESS', 'TRANSMISSION', 'ENVIRONMENT', 'UV'} and mode != 'thickness':
 			bpy.context.scene.cycles.samples = 1
 
 		# Pixel Padding
-		bpy.context.scene.render.bake.margin = padding * sampling_scale
+		bake_settings.margin = padding * sampling_scale
 
 		# Disable Direct and Indirect for all 'DIFFUSE' bake types
 		if modes[mode].type == 'DIFFUSE':
-			bpy.context.scene.render.bake.use_pass_direct = False
-			bpy.context.scene.render.bake.use_pass_indirect = False
-			bpy.context.scene.render.bake.use_pass_color = True
-		
+			bake_settings.use_pass_direct = False
+			bake_settings.use_pass_indirect = False
+			bake_settings.use_pass_color = True
+
+		kwargs = {
+			'type': modes[mode].type,
+			'use_clear': False,
+			'use_selected_to_active': is_multi,
+			'cage_extrusion': tt_settings().bake_cage_extrusion,
+			'max_ray_distance': tt_settings().bake_ray_distance,
+			'normal_space': modes[mode].normal_space
+		}
 		if settings.bversion < 2.90:
-			if obj_cage is None:
-				bpy.ops.object.bake(
-					type=modes[mode].type, 
-					use_clear=False, 
-					use_selected_to_active=is_multi, 
-					cage_extrusion=cage_extrusion, 
-					normal_space=modes[mode].normal_space
-				)
-			else:
-				bpy.ops.object.bake(
-					type=modes[mode].type, 
-					use_clear=False, 
-					use_selected_to_active=is_multi, 
-					cage_extrusion=cage_extrusion, 
-					normal_space=modes[mode].normal_space, 
-					use_cage=True, 
-					cage_object=obj_cage.name
-				)
-		else:
-			if obj_cage is None:
-				bpy.ops.object.bake(
-					type=modes[mode].type, 
-					use_clear=False, 
-					use_selected_to_active=is_multi, 
-					cage_extrusion=cage_extrusion, 
-					max_ray_distance=ray_distance, 
-					normal_space=modes[mode].normal_space
-				)
-			else:
-				bpy.ops.object.bake(
-					type=modes[mode].type, 
-					use_clear=False, 
-					use_selected_to_active=is_multi, 
-					cage_extrusion=cage_extrusion, 
-					max_ray_distance=ray_distance, 
-					normal_space=modes[mode].normal_space, 
-					use_cage=True, 
-					cage_object=obj_cage.name
-				)
+			del kwargs['max_ray_distance']
 
+		if obj_cage:
+			kwargs['use_cage'] = True
+			kwargs['cage_object'] = obj_cage.name
 
-bpy.utils.register_class(op)
+		bpy.ops.object.bake(**kwargs)

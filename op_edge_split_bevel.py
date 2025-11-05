@@ -22,6 +22,8 @@ class op(bpy.types.Operator):
 
 	@classmethod
 	def poll(cls, context):
+		if bpy.context.area.ui_type != 'UV':
+			return False
 		if not bpy.context.active_object:
 			return False
 		if bpy.context.active_object.mode != 'EDIT':
@@ -29,8 +31,6 @@ class op(bpy.types.Operator):
 		if not bpy.context.object.data.uv_layers:
 			return False
 		if bpy.context.scene.tool_settings.use_uv_select_sync:
-			return False
-		if bpy.context.area.type != 'IMAGE_EDITOR':
 			return False
 		return True
 
@@ -48,8 +48,8 @@ def main(self, radius):
 	#Store selection
 	selected_faces = utilities_uv.selection_store(bm, uv_layers, return_selected_UV_faces=True)
 
-	islands = utilities_uv.getSelectionIslands(bm, uv_layers, selected_faces)
-	
+	islands = utilities_uv.getSelectionIslands(bm, uv_layers, selected_faces=selected_faces)
+
 
 	# Collect UV to Vert
 	vert_to_uv = utilities_uv.get_vert_to_uv(bm, uv_layers)
@@ -350,6 +350,3 @@ def get_vert_edge_rails(edges):
 						vert_rails[v1].append(e)
 
 	return vert_rails
-
-
-bpy.utils.register_class(op)
